@@ -1,0 +1,325 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User account profile document.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Unique Firebase Auth UID"
+        },
+        "email": {
+          "type": "string",
+          "maxLength": 320,
+          "description": "Google authenticated email"
+        },
+        "displayName": {
+          "type": "string",
+          "maxLength": 120,
+          "description": "User display name"
+        },
+        "photoURL": {
+          "type": "string",
+          "maxLength": 1024,
+          "description": "Avatar photo URL"
+        },
+        "role": {
+          "type": "string",
+          "enum": [
+            "admin",
+            "user"
+          ],
+          "description": "Role of the user in the vault app"
+        },
+        "plan": {
+          "type": "string",
+          "enum": [
+            "free",
+            "paid",
+            "unlimited",
+            "biweekly",
+            "monthly",
+            "yearly"
+          ],
+          "description": "User subscription tier (free: 10 slots, biweekly: 30 slots, monthly: 50 slots, yearly/unlimited: unlimited slots)"
+        },
+        "planDuration": {
+          "type": "string",
+          "enum": [
+            "biweekly",
+            "monthly",
+            "yearly"
+          ],
+          "description": "Selected duration for subscription plan"
+        },
+        "extraSlots": {
+          "type": "number",
+          "description": "Additional credential slots allotted (20 for biweekly, 40 for monthly, 999999 for yearly)"
+        },
+        "maxCredentialSlots": {
+          "type": "number",
+          "description": "Maximum allowed total credential slots (30 for biweekly, 50 for monthly, 999999 for yearly)"
+        },
+        "approvedAt": {
+          "type": "number",
+          "description": "Timestamp in milliseconds when payment was approved by administrator"
+        },
+        "expiresAt": {
+          "type": "number",
+          "description": "Timestamp in milliseconds when subscription expires (countdown end)"
+        },
+        "isExpired": {
+          "type": "boolean",
+          "description": "Flag indicating if countdown has elapsed"
+        },
+        "paymentStatus": {
+          "type": "string",
+          "enum": [
+            "none",
+            "pending",
+            "verified"
+          ],
+          "description": "Direct bank payment status"
+        },
+        "paymentRef": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Bank transfer payment reference or sender identifier"
+        },
+        "paymentCurrency": {
+          "type": "string",
+          "enum": [
+            "USD",
+            "NGN"
+          ],
+          "description": "Currency paid: $4.88 USD or 6500 NGN"
+        },
+        "senderName": {
+          "type": "string",
+          "maxLength": 120,
+          "description": "Depositor or sender name for bank transfer"
+        },
+        "bankUsed": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "Bank used by user to transfer"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Account registration time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Last profile sync time"
+        }
+      },
+      "required": [
+        "userId",
+        "email",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "SupportTicket": {
+      "title": "SupportTicket",
+      "description": "User suggestions, inquiries, or complaints sent to the administrator with user UID.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Unique ticket ID"
+        },
+        "userId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "UID of the user submitting the ticket"
+        },
+        "userEmail": {
+          "type": "string",
+          "maxLength": 320,
+          "description": "Email of the submitting user"
+        },
+        "userName": {
+          "type": "string",
+          "maxLength": 120,
+          "description": "Display name of user"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "suggestion",
+            "complaint",
+            "inquiry",
+            "payment"
+          ],
+          "description": "Category of support item"
+        },
+        "subject": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Ticket subject"
+        },
+        "message": {
+          "type": "string",
+          "maxLength": 5000,
+          "description": "Suggestion or complaint message"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "reviewed",
+            "resolved"
+          ],
+          "description": "Ticket status"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation timestamp"
+        }
+      },
+      "required": [
+        "userId",
+        "userEmail",
+        "type",
+        "subject",
+        "message",
+        "createdAt"
+      ]
+    },
+    "VaultItem": {
+      "title": "VaultItem",
+      "description": "A secure personal credential or document record strictly owned by the user.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Unique vault item ID"
+        },
+        "userId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Owner UID matching auth.uid"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "credential",
+            "document"
+          ],
+          "description": "Type of vault entry"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "Item label or document title"
+        },
+        "service": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "Service or provider name (e.g., Google, Facebook)"
+        },
+        "username": {
+          "type": "string",
+          "maxLength": 320,
+          "description": "Login username, handle, or email"
+        },
+        "password": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "Confidential secret or password"
+        },
+        "url": {
+          "type": "string",
+          "maxLength": 1024,
+          "description": "Service or platform login URL"
+        },
+        "category": {
+          "type": "string",
+          "enum": [
+            "social",
+            "work",
+            "personal",
+            "finance",
+            "document",
+            "other"
+          ],
+          "description": "Category tag for filtering"
+        },
+        "notes": {
+          "type": "string",
+          "maxLength": 5000,
+          "description": "Personal document text or security notes"
+        },
+        "favorite": {
+          "type": "boolean",
+          "description": "Starred or pinned status"
+        },
+        "imageUrl": {
+          "type": "string",
+          "maxLength": 2048,
+          "description": "URL or storage reference for uploaded document image"
+        },
+        "imageName": {
+          "type": "string",
+          "maxLength": 255,
+          "description": "Original image file name"
+        },
+        "imageSize": {
+          "type": "number",
+          "description": "Size of image in bytes, max 200MB (209715200 bytes)"
+        },
+        "imageType": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "MIME type of the image"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation timestamp"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Last update timestamp"
+        }
+      },
+      "required": [
+        "userId",
+        "type",
+        "title",
+        "category",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "User profile directory document with admin listing permissions."
+    },
+    "/users/{userId}/vault/{itemId}": {
+      "schema": "VaultItem",
+      "description": "Zero-trust secure credentials and documents subcollection isolated strictly to the authenticated user."
+    },
+    "/support_tickets/{ticketId}": {
+      "schema": "SupportTicket",
+      "description": "Suggestions, complaints, and inquiries submitted by users, tagged with user UID and accessible by admin."
+    }
+  }
+}

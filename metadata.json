@@ -1,0 +1,6 @@
+{
+  "name": "Clockin Vault - Secure Personal Documents & Credentials",
+  "description": "A secure collaborative vault powered by Firebase with Google Sign-In, zero-knowledge credential isolation, personal documents storage, and admin directory.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

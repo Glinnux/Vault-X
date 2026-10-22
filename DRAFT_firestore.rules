@@ -1,0 +1,110 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // 1. Global Default-Deny Catch-All
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 2. Hardened Primitives
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null && request.auth.uid != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    // 3. UserProfile Entity Validator
+    function isValidUserProfile(data) {
+      return data.keys().hasAll(['userId', 'email', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['userId', 'email', 'displayName', 'photoURL', 'createdAt', 'updatedAt']) &&
+        data.userId is string && data.userId == request.auth.uid &&
+        data.email is string && data.email.size() <= 320 &&
+        (!('displayName' in data.keys()) || (data.displayName is string && data.displayName.size() <= 120)) &&
+        (!('photoURL' in data.keys()) || (data.photoURL is string && data.photoURL.size() <= 1024)) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    // 4. VaultItem Entity Validator
+    function isValidVaultItem(data) {
+      return data.keys().hasAll(['userId', 'type', 'title', 'category', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['userId', 'type', 'title', 'service', 'username', 'password', 'url', 'category', 'notes', 'favorite', 'createdAt', 'updatedAt']) &&
+        data.userId is string && data.userId == request.auth.uid &&
+        data.type is string && (data.type == 'credential' || data.type == 'document') &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 200 &&
+        (!('service' in data.keys()) || (data.service is string && data.service.size() <= 100)) &&
+        (!('username' in data.keys()) || (data.username is string && data.username.size() <= 320)) &&
+        (!('password' in data.keys()) || (data.password is string && data.password.size() <= 500)) &&
+        (!('url' in data.keys()) || (data.url is string && data.url.size() <= 1024)) &&
+        data.category is string && data.category.size() <= 50 &&
+        (!('notes' in data.keys()) || (data.notes is string && data.notes.size() <= 5000)) &&
+        (!('favorite' in data.keys()) || data.favorite is bool) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    // 5. Admins collection
+    match /admins/{adminId} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+
+    // 6. Users Collection: User directory
+    match /users/{userId} {
+      allow list: if isAdmin();
+      allow get: if (isOwner(userId) || isAdmin()) && isValidId(userId);
+      allow create: if isOwner(userId) && isValidId(userId) &&
+        isValidUserProfile(incoming()) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isOwner(userId) && isValidId(userId) &&
+        isValidUserProfile(incoming()) &&
+        incoming().userId == existing().userId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time;
+      allow delete: if false;
+
+      // 7. Zero-Knowledge Private Vault: strictly isolated per user
+      match /vault/{itemId} {
+        allow get, delete: if isOwner(userId) && isValidId(userId) && isValidId(itemId);
+        allow list: if isOwner(userId);
+
+        allow create: if isOwner(userId) && isValidId(userId) && isValidId(itemId) &&
+          isValidVaultItem(incoming()) &&
+          incoming().createdAt == request.time &&
+          incoming().updatedAt == request.time;
+
+        allow update: if isOwner(userId) && isValidId(userId) && isValidId(itemId) &&
+          isValidVaultItem(incoming()) &&
+          incoming().userId == existing().userId &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().updatedAt == request.time &&
+          (
+            incoming().diff(existing()).affectedKeys().hasOnly(['password', 'updatedAt']) ||
+            incoming().diff(existing()).affectedKeys().hasOnly(['favorite', 'updatedAt']) ||
+            incoming().diff(existing()).affectedKeys().hasOnly(['title', 'service', 'username', 'password', 'url', 'category', 'notes', 'favorite', 'updatedAt'])
+          );
+      }
+    }
+  }
+}

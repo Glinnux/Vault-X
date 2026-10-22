@@ -1,0 +1,136 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // 1. Global Default-Deny Catch-All
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 2. Hardened Primitives
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null && request.auth.uid != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isSuperAdmin() {
+      return isSignedIn() && request.auth.token.email != null && (
+        request.auth.token.email.lower() == 'oluwolefaith92@gmail.com' ||
+        request.auth.token.email.lower() == 'faitholuwole6@gmail.com'
+      );
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        isSuperAdmin() ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    // 3. UserProfile Entity Validator
+    function isValidUserProfile(data) {
+      return data.keys().hasAll(['userId', 'email', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['userId', 'email', 'displayName', 'photoURL', 'plan', 'planDuration', 'extraSlots', 'maxCredentialSlots', 'paymentStatus', 'paymentRef', 'paymentCurrency', 'senderName', 'bankUsed', 'role', 'approvedAt', 'expiresAt', 'isExpired', 'isBanned', 'bannedReason', 'bannedAt', 'bannedBy', 'createdAt', 'updatedAt']) &&
+        data.userId is string && (data.userId == request.auth.uid || isAdmin()) &&
+        data.email is string && data.email.size() <= 320 &&
+        (!('displayName' in data.keys()) || (data.displayName is string && data.displayName.size() <= 120)) &&
+        (!('photoURL' in data.keys()) || (data.photoURL is string && data.photoURL.size() <= 1024)) &&
+        (!('plan' in data.keys()) || (data.plan in ['free', 'paid', 'unlimited', 'biweekly', 'monthly', 'yearly'])) &&
+        (!('planDuration' in data.keys()) || (data.planDuration in ['biweekly', 'monthly', 'yearly'])) &&
+        (!('extraSlots' in data.keys()) || (data.extraSlots is number && data.extraSlots >= 0 && data.extraSlots <= 999999)) &&
+        (!('maxCredentialSlots' in data.keys()) || (data.maxCredentialSlots is number && data.maxCredentialSlots >= 0 && data.maxCredentialSlots <= 999999)) &&
+        (!('approvedAt' in data.keys()) || (data.approvedAt is number)) &&
+        (!('expiresAt' in data.keys()) || (data.expiresAt is number)) &&
+        (!('isExpired' in data.keys()) || (data.isExpired is bool)) &&
+        (!('isBanned' in data.keys()) || (data.isBanned is bool)) &&
+        (!('bannedReason' in data.keys()) || (data.bannedReason is string && data.bannedReason.size() <= 500)) &&
+        (!('bannedBy' in data.keys()) || (data.bannedBy is string && data.bannedBy.size() <= 120)) &&
+        (!('paymentStatus' in data.keys()) || (data.paymentStatus in ['none', 'pending', 'verified'])) &&
+        (!('paymentRef' in data.keys()) || (data.paymentRef is string && data.paymentRef.size() <= 200)) &&
+        (!('paymentCurrency' in data.keys()) || (data.paymentCurrency in ['USD', 'NGN'])) &&
+        (!('senderName' in data.keys()) || (data.senderName is string && data.senderName.size() <= 120)) &&
+        (!('bankUsed' in data.keys()) || (data.bankUsed is string && data.bankUsed.size() <= 100)) &&
+        (!('role' in data.keys()) || (data.role in ['admin', 'user'])) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    // 4. SupportTicket Entity Validator
+    function isValidSupportTicket(data) {
+      return data.keys().hasAll(['userId', 'userEmail', 'type', 'subject', 'message', 'createdAt']) &&
+        data.keys().hasOnly(['id', 'userId', 'userEmail', 'userName', 'type', 'subject', 'message', 'status', 'isRedirectedToOwner', 'redirectedBy', 'redirectedAt', 'adminNotes', 'createdAt']) &&
+        data.userId is string && data.userId == request.auth.uid &&
+        data.userEmail is string && data.userEmail.size() <= 320 &&
+        (!('userName' in data.keys()) || (data.userName is string && data.userName.size() <= 120)) &&
+        data.type in ['suggestion', 'complaint', 'inquiry', 'payment'] &&
+        data.subject is string && data.subject.size() >= 1 && data.subject.size() <= 200 &&
+        data.message is string && data.message.size() >= 1 && data.message.size() <= 5000 &&
+        (!('status' in data.keys()) || data.status in ['pending', 'reviewed', 'resolved']) &&
+        (!('isRedirectedToOwner' in data.keys()) || data.isRedirectedToOwner is bool) &&
+        (!('redirectedBy' in data.keys()) || (data.redirectedBy is string && data.redirectedBy.size() <= 120)) &&
+        (!('adminNotes' in data.keys()) || (data.adminNotes is string && data.adminNotes.size() <= 2000)) &&
+        data.createdAt is timestamp;
+    }
+
+    // 5. Users Collection: User directory
+    match /users/{userId} {
+      allow list: if isAdmin();
+      allow get: if (isOwner(userId) || isAdmin()) && isValidId(userId);
+      allow create: if isOwner(userId) && isValidId(userId) &&
+        isValidUserProfile(incoming()) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if (isOwner(userId) || isAdmin()) && isValidId(userId) &&
+        isValidUserProfile(incoming()) &&
+        incoming().userId == existing().userId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        // Unbanning rule: if account is currently banned, only superadmin can unban it!
+        (!('isBanned' in existing()) || existing().isBanned == false || incoming().isBanned == true || isSuperAdmin());
+      allow delete: if false;
+
+      // 6. Zero-Knowledge Private Vault: strictly isolated per user (blocked if banned)
+      match /vault/{itemId} {
+        allow get, delete: if isOwner(userId) && isValidId(userId) && isValidId(itemId);
+        allow list: if isOwner(userId);
+        allow create, update: if isOwner(userId) && isValidId(userId) && isValidId(itemId) &&
+          incoming().userId == request.auth.uid &&
+          incoming().createdAt is timestamp &&
+          incoming().updatedAt == request.time;
+      }
+    }
+
+    // 7. Support Tickets Collection
+    match /support_tickets/{ticketId} {
+      allow get: if (isSignedIn() && resource.data.userId == request.auth.uid) || isAdmin();
+      allow list: if isSignedIn();
+      allow create: if isSignedIn() && isValidId(ticketId) &&
+        isValidSupportTicket(incoming()) &&
+        incoming().userId == request.auth.uid &&
+        incoming().createdAt == request.time;
+      allow update, delete: if isAdmin() && isValidId(ticketId);
+    }
+
+    // 8. Administrators Collection
+    match /admins/{adminId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+  }
+}

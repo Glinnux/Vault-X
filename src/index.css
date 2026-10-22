@@ -1,0 +1,158 @@
+@import "tailwindcss";
+
+html {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  height: 100%;
+}
+
+body {
+  min-height: 100dvh;
+  overscroll-behavior-y: none;
+  background-color: #040e08;
+  color: #f8fafc;
+}
+
+@layer utilities {
+  .pb-safe {
+    padding-bottom: max(env(safe-area-inset-bottom, 0px), 16px);
+  }
+  .pt-safe {
+    padding-top: max(env(safe-area-inset-top, 0px), 16px);
+  }
+
+  /* Vault X Subtle Precision Grid (Green / White Accent) */
+  .cyber-grid {
+    background-image: 
+      linear-gradient(to right, rgba(16, 185, 129, 0.06) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(16, 185, 129, 0.06) 1px, transparent 1px);
+    background-size: 32px 32px;
+  }
+
+  /* Scanline effect for Vault cards and panels */
+  .scanline-container {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .scanline-container::after {
+    content: '';
+    position: absolute;
+    top: -100%;
+    left: 0;
+    right: 0;
+    height: 60%;
+    background: linear-gradient(
+      180deg,
+      transparent 0%,
+      rgba(16, 185, 129, 0.08) 50%,
+      rgba(255, 255, 255, 0.12) 80%,
+      transparent 100%
+    );
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+  }
+
+  .scanline-container:hover::after {
+    opacity: 1;
+    animation: scanline-sweep 1.2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  }
+
+  /* Vault X Tech HUD corner markers */
+  .tech-corners {
+    position: relative;
+  }
+  .tech-corners::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 7px;
+    height: 7px;
+    border-top: 2px solid rgba(52, 211, 153, 0.7);
+    border-left: 2px solid rgba(52, 211, 153, 0.7);
+    border-top-left-radius: 2px;
+    transition: all 0.3s ease;
+    pointer-events: none;
+  }
+  .tech-corners::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    right: 0;
+    width: 7px;
+    height: 7px;
+    border-bottom: 2px solid rgba(52, 211, 153, 0.7);
+    border-right: 2px solid rgba(52, 211, 153, 0.7);
+    border-bottom-right-radius: 2px;
+    transition: all 0.3s ease;
+    pointer-events: none;
+  }
+  .tech-corners:hover::before,
+  .tech-corners:hover::after {
+    border-color: #ffffff;
+    filter: drop-shadow(0 0 6px rgba(52, 211, 153, 0.8));
+  }
+}
+
+@keyframes scanline-sweep {
+  0% {
+    top: -60%;
+  }
+  100% {
+    top: 140%;
+  }
+}
+
+@keyframes radar-ping {
+  0% {
+    transform: scale(1);
+    opacity: 0.85;
+  }
+  70% {
+    transform: scale(2.2);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(2.2);
+    opacity: 0;
+  }
+}
+
+.animate-radar-ping {
+  animation: radar-ping 2.5s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+
+@keyframes subtle-float {
+  0%, 100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+}
+
+.animate-subtle-float {
+  animation: subtle-float 6s ease-in-out infinite;
+}
+
+@keyframes cyber-shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.cyber-shimmer-bg {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0) 0%,
+    rgba(52, 211, 153, 0.2) 50%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  background-size: 200% 100%;
+  animation: cyber-shimmer 3s infinite linear;
+}
