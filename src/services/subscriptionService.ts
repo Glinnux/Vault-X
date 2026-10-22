@@ -49,9 +49,9 @@ export function getPlanOption(id: PlanDuration): PlanOption {
 }
 
 const DEFAULT_BANK_DETAILS: BankAccountDetails = {
-  bankName: 'Guaranty Trust Bank (GTBank)',
-  accountNumber: '0812345678', // Official bank transfer account number
-  accountName: 'Faith Oluwole / Vault X',
+  bankName: 'OPay',
+  accountNumber: '8109371240',
+  accountName: 'Faith Oluwole',
   instructions:
     'Transfer the fee for your chosen plan in Nigerian Naira (₦) to the bank account below. Once transferred, enter your depositor name and reference to submit for admin confirmation.',
   routingOrSortCode: '058-152062',
@@ -64,7 +64,19 @@ export function getBankTransferDetails(): BankAccountDetails {
   try {
     const raw = localStorage.getItem(BANK_DETAILS_STORAGE_KEY);
     if (raw) {
-      return { ...DEFAULT_BANK_DETAILS, ...JSON.parse(raw) };
+      const savedDetails = JSON.parse(raw) as Partial<BankAccountDetails>;
+      if (savedDetails.accountNumber === '0812345678') {
+        const migratedDetails = {
+          ...DEFAULT_BANK_DETAILS,
+          ...savedDetails,
+          bankName: DEFAULT_BANK_DETAILS.bankName,
+          accountNumber: DEFAULT_BANK_DETAILS.accountNumber,
+          accountName: DEFAULT_BANK_DETAILS.accountName,
+        };
+        localStorage.setItem(BANK_DETAILS_STORAGE_KEY, JSON.stringify(migratedDetails));
+        return migratedDetails;
+      }
+      return { ...DEFAULT_BANK_DETAILS, ...savedDetails };
     }
   } catch (e) {
     console.warn('Error reading stored bank details:', e);

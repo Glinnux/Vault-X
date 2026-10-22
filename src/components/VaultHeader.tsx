@@ -65,7 +65,7 @@ export const VaultHeader: React.FC<VaultHeaderProps> = ({
   }, [isAdmin]);
 
   return (
-    <header className="sticky top-0 z-30 bg-[#040e08]/90 backdrop-blur-xl border-b border-emerald-900/40 text-white shadow-xl shadow-black/40">
+    <header className="site-chrome sticky top-0 z-30 bg-[#040e08]/90 backdrop-blur-xl border-b border-emerald-900/40 text-white shadow-xl shadow-black/10">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
         {/* Main top bar */}
         <div className="h-16 flex items-center justify-between">
@@ -75,7 +75,7 @@ export const VaultHeader: React.FC<VaultHeaderProps> = ({
             onClick={() => onSelectView('all')}
           >
             <div className="relative">
-              <VaultXLogo size={40} showGlow={true} />
+              <VaultXLogo size={64} showGlow={true} />
               <span className="absolute -top-1 -right-1 flex h-2.5 w-2.5">
                 <span className="animate-radar-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                 <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
@@ -84,7 +84,7 @@ export const VaultHeader: React.FC<VaultHeaderProps> = ({
             <div>
               <div className="flex items-center space-x-2">
                 <span className="font-extrabold text-lg sm:text-xl tracking-tight text-white group-hover:text-emerald-300 transition-colors font-mono">
-                  VAULT<span className="text-emerald-400">X</span>
+                  VAULT<span className="text-emerald-400">-X</span>
                 </span>
                 <span className="text-[10px] font-mono tracking-wider uppercase px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/35 flex items-center gap-1">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping"></span>

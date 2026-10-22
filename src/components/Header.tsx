@@ -25,7 +25,7 @@ export const Header: React.FC<HeaderProps> = ({
           <div>
             <div className="flex items-center space-x-2">
               <span className="font-extrabold text-lg tracking-tight text-white font-mono">
-                VAULT<span className="text-emerald-400">X</span>
+                VAULT<span className="text-emerald-400">-X</span>
               </span>
               <span className="text-[11px] font-medium uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
                 PRO

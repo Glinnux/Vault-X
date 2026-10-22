@@ -271,7 +271,7 @@ function VaultApp() {
   };
 
   return (
-    <div className="min-h-screen bg-[#090d16] text-slate-100 flex flex-col font-sans selection:bg-cyan-500 selection:text-black relative">
+    <div className="app-shell min-h-screen bg-[#090d16] text-slate-100 flex flex-col font-sans selection:bg-cyan-500 selection:text-black relative">
       {/* Ambient Futuristic Cyber Grid & Particle Canvas */}
       <CyberGridBackground />
 
@@ -615,11 +615,11 @@ function VaultApp() {
       </main>
 
       {/* Footer */}
-      <footer className="border-t border-emerald-950 bg-[#040e08]/95 py-4 px-4 sm:px-6 text-center text-[11px] text-slate-400 font-mono">
+      <footer className="site-chrome border-t border-emerald-950 bg-[#040e08]/95 py-4 px-4 sm:px-6 text-center text-[11px] text-slate-400 font-mono">
         <div className="max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2">
           <div className="flex items-center space-x-2">
             <Lock className="w-3.5 h-3.5 text-emerald-400" />
-            <span>Vault X &bull; Quantum-Resistant End-to-End Isolated Data</span>
+            <span>Vault-X &bull; Quantum-Resistant End-to-End Isolated Data</span>
           </div>
           <div className="flex items-center space-x-3 text-slate-400">
             {isAdmin && (

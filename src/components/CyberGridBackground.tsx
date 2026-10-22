@@ -70,7 +70,7 @@ export const CyberGridBackground: React.FC = () => {
         // Draw node
         ctx.beginPath();
         ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(52, 211, 153, ${Math.max(0.15, dynamicAlpha)})`;
+        ctx.fillStyle = `rgba(37, 99, 235, ${Math.max(0.08, dynamicAlpha * 0.55)})`;
         ctx.fill();
 
         // Connect nearby nodes with faint green/white lines
@@ -85,7 +85,7 @@ export const CyberGridBackground: React.FC = () => {
             ctx.beginPath();
             ctx.moveTo(p.x, p.y);
             ctx.lineTo(p2.x, p2.y);
-            ctx.strokeStyle = `rgba(52, 211, 153, ${lineAlpha})`;
+            ctx.strokeStyle = `rgba(37, 99, 235, ${lineAlpha * 0.45})`;
             ctx.lineWidth = 0.75;
             ctx.stroke();
           }
@@ -105,16 +105,13 @@ export const CyberGridBackground: React.FC = () => {
 
   return (
     <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden">
-      {/* Deep obsidian emerald backing */}
-      <div className="absolute inset-0 bg-[#040e08]" />
+      <div className="absolute inset-0 app-backdrop" />
 
-      {/* Cyber geometric grid layer */}
-      <div className="absolute inset-0 cyber-grid opacity-85" />
+      <div className="absolute inset-0 cyber-grid opacity-50" />
 
-      {/* Atmospheric radial ambient lights (emerald & pure white highlights) */}
-      <div className="absolute -top-40 left-1/4 w-[650px] h-[650px] bg-emerald-600/12 rounded-full blur-[140px] pointer-events-none" />
-      <div className="absolute top-1/3 -right-32 w-[550px] h-[550px] bg-white/[0.04] rounded-full blur-[150px] pointer-events-none" />
-      <div className="absolute -bottom-40 left-1/3 w-[600px] h-[600px] bg-emerald-500/10 rounded-full blur-[150px] pointer-events-none" />
+      <div className="absolute -top-40 left-1/4 w-[650px] h-[650px] bg-blue-500/[0.04] rounded-full blur-[140px] pointer-events-none" />
+      <div className="absolute top-1/3 -right-32 w-[550px] h-[550px] bg-cyan-500/[0.035] rounded-full blur-[150px] pointer-events-none" />
+      <div className="absolute -bottom-40 left-1/3 w-[600px] h-[600px] bg-blue-500/[0.03] rounded-full blur-[150px] pointer-events-none" />
 
       {/* Subtle interactive particles canvas */}
       <canvas
