@@ -53,6 +53,14 @@ Open your browser and navigate to:
 
 ---
 
+### Deploy the frontend to GitHub Pages
+
+The GitHub Actions workflow builds the frontend with the `/Vault-X/` base path and deploys it when changes are pushed to `main`. In the repository settings, open **Pages** and set the build and deployment source to **GitHub Actions**. After the workflow succeeds, open the site URL shown in the workflow's deployment summary.
+
+GitHub Pages hosts static files only; Express server endpoints require a separate backend deployment.
+
+---
+
 ### Step 4: Production Build & Run (Optional)
 To test a production-optimized build locally:
 ```bash

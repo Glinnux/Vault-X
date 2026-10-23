@@ -1,23 +1,23 @@
 {
-  "id": "/",
+  "id": "./",
   "name": "Vault X",
   "short_name": "Vault X",
   "description": "Vault X - Secure personal documents and credentials vault with zero-knowledge data isolation.",
-  "start_url": "/",
-  "scope": "/",
+  "start_url": "./",
+  "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
   "background_color": "#040e08",
   "theme_color": "#040e08",
   "icons": [
     {
-      "src": "/icon.svg",
+      "src": "icon.svg",
       "sizes": "192x192 512x512",
       "type": "image/svg+xml",
       "purpose": "any"
     },
     {
-      "src": "/icon-maskable.svg",
+      "src": "icon-maskable.svg",
       "sizes": "192x192 512x512",
       "type": "image/svg+xml",
       "purpose": "maskable"

@@ -41,7 +41,7 @@ export const VaultXLogo: React.FC<VaultXLogoProps> = ({
         )}
 
         <img
-          src="/vault-x-logo.png"
+          src={`${import.meta.env.BASE_URL}vault-x-logo.png`}
           alt="Vault X"
           width="100%"
           height="100%"
