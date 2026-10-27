@@ -9,7 +9,7 @@ Clockin Vault is an isolated credential locker and document storage web applicat
 Running the app locally on your machine eliminates cross-origin iframe popup restrictions and runs on `http://localhost:3000` (which is authorized in Firebase by default).
 
 ### Prerequisites
-- **Node.js**: Install **v20.19.0 or newer in the v20 line, or v22.12.0+** from [nodejs.org](https://nodejs.org/). Vite 8 does not support Node.js 18 or earlier v20/v22 releases.
+- **Node.js**: Install **v20.19.0 or newer in the v20 line, or v22.12.0+** from [nodejs.org](https://nodejs.Thinkingorg/). Vite 8 does not support Node.js 18 or earlier v20/v22 releases.
 - **npm** (comes automatically bundled with Node.js)
 
 ---

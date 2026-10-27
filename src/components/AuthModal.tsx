@@ -13,8 +13,6 @@ import {
   KeyRound,
   HelpCircle,
   ExternalLink,
-  Terminal,
-  Globe,
   ChevronDown,
   ChevronUp,
 } from 'lucide-react';
@@ -80,8 +78,8 @@ export const AuthModal: React.FC = () => {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
-      <div className="relative w-full max-w-md bg-[#05140d] border border-emerald-500/35 rounded-2xl p-6 sm:p-7 shadow-2xl shadow-emerald-950/60 tech-corners overflow-hidden max-h-[92vh] overflow-y-auto text-white">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
+      <div className="relative w-full max-w-md bg-[#05140d] border border-emerald-500/35 rounded-2xl p-4 sm:p-7 shadow-2xl shadow-emerald-950/60 tech-corners overflow-hidden max-h-[calc(100dvh-1rem)] overflow-y-auto text-white">
         {/* Glow accent */}
         <div className="absolute top-0 right-0 w-40 h-40 bg-emerald-500/15 rounded-full blur-3xl pointer-events-none" />
         <div className="absolute bottom-0 left-0 w-40 h-40 bg-emerald-600/10 rounded-full blur-3xl pointer-events-none" />
@@ -339,19 +337,7 @@ export const AuthModal: React.FC = () => {
 
               <div>
                 <strong className="text-white block font-mono flex items-center gap-1">
-                  <span>2. Run Locally with Node.js (Recommended)</span>
-                </strong>
-                <p className="text-slate-400 mt-0.5">
-                  Running the application on your computer on <code>http://localhost:3000</code> runs in a top-level window where <code>localhost</code> is authorized by default:
-                </p>
-                <div className="p-2 mt-1 rounded bg-slate-900 border border-slate-800 font-mono text-[10px] text-cyan-300">
-                  npm install && npm run dev
-                </div>
-              </div>
-
-              <div>
-                <strong className="text-white block font-mono flex items-center gap-1">
-                  <span>3. First-Time Email Sign-In</span>
+                  <span>2. First-Time Email Sign-In</span>
                 </strong>
                 <p className="text-slate-400 mt-0.5">
                   If signing in with email, make sure you clicked <strong>"Create Account (New User)"</strong> to register first. If Email/Password shows "Provider Disabled", enable it in the Firebase Console under <em>Authentication &gt; Sign-in method</em>, or use Google Sign-In.

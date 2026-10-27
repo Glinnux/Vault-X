@@ -190,6 +190,7 @@ export async function submitPaymentVerification(data: {
   paymentCurrency?: 'NGN' | 'USD';
   amount: number;
   planDuration?: 'biweekly' | 'monthly' | 'yearly';
+  receipt: { name: string; type: string; size: number; data: string };
 }): Promise<PaymentVerificationResult> {
   const planDuration = data.planDuration || 'biweekly';
   const currency = 'NGN';
@@ -249,6 +250,7 @@ User UID for Verification: ${data.userId}`,
         paymentCurrency: currency,
         planDuration,
         amount: data.amount,
+        receipt: data.receipt,
         adminEmail: ADMIN_SUPPORT_EMAIL,
       }),
     });

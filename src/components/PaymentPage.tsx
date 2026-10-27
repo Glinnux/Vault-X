@@ -6,7 +6,6 @@ import {
   Building2,
   CreditCard,
   ShieldCheck,
-  Zap,
   Lock,
   Sparkles,
   HelpCircle,
@@ -19,6 +18,7 @@ import {
   Mail,
   UserCheck,
   Calendar,
+  Upload,
 } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
 import { LanguageSelector } from './LanguageSelector';
@@ -32,7 +32,6 @@ import {
   FREE_CREDENTIAL_SLOTS,
   getBankTransferDetails,
   saveBankTransferDetails,
-  activatePaidPlan,
   resetToFreePlan,
 } from '../services/subscriptionService';
 import { BankAccountDetails, UserSubscription, PlanDuration } from '../types/vault';
@@ -71,6 +70,8 @@ export const PaymentPage: React.FC<PaymentPageProps> = ({
   const [senderName, setSenderName] = useState('');
   const [paymentRef, setPaymentRef] = useState('');
   const [bankUsed, setBankUsed] = useState('');
+  const [receiptFile, setReceiptFile] = useState<File | null>(null);
+  const [receiptError, setReceiptError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [activationSuccess, setActivationSuccess] = useState(false);
   const [emailNoticeModal, setEmailNoticeModal] = useState<{
@@ -94,6 +95,32 @@ export const PaymentPage: React.FC<PaymentPageProps> = ({
 
   // Distinct payment reference prefix
   const referenceCode = `VAULT-${userId ? userId.substring(0, 8).toUpperCase() : 'USER'}`;
+
+  const handleReceiptChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] || null;
+    setReceiptError(null);
+    if (!file) {
+      setReceiptFile(null);
+      return;
+    }
+    const acceptedTypes = ['application/pdf', 'image/png', 'image/jpeg', 'image/webp', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
+    const acceptedExtension = /\.(pdf|png|jpe?g|webp|doc|docx)$/i.test(file.name);
+    if ((!acceptedTypes.includes(file.type) && !acceptedExtension) || file.size > 10 * 1024 * 1024) {
+      setReceiptFile(null);
+      setReceiptError(file.size > 10 * 1024 * 1024 ? 'Receipt must be 10MB or smaller.' : 'Please upload a PDF, Word document, or image receipt.');
+      e.target.value = '';
+      return;
+    }
+    setReceiptFile(file);
+  };
+
+  const readReceiptAsBase64 = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result).split(',')[1] || '');
+      reader.onerror = () => reject(new Error('Could not read the receipt file.'));
+      reader.readAsDataURL(file);
+    });
 
   const handleCopy = (text: string, label: string) => {
     navigator.clipboard.writeText(text);
@@ -130,6 +157,11 @@ export const PaymentPage: React.FC<PaymentPageProps> = ({
       onToast('Please enter the Bank Used for the transfer.', 'error');
       return;
     }
+    if (!receiptFile) {
+      setReceiptError('A payment receipt is required before the notification email can be sent.');
+      onToast('Please upload your payment receipt first.', 'error');
+      return;
+    }
 
     const finalRef = paymentRef.trim() || referenceCode;
     const amountVal = currentPlan.priceNGN;
@@ -137,6 +169,12 @@ export const PaymentPage: React.FC<PaymentPageProps> = ({
 
     try {
       setSubmitting(true);
+      const receiptData = {
+        name: receiptFile.name,
+        type: receiptFile.type || 'application/octet-stream',
+        size: receiptFile.size,
+        data: await readReceiptAsBase64(receiptFile),
+      };
       const result = await submitPaymentVerification({
         userId,
         userEmail,
@@ -146,6 +184,7 @@ export const PaymentPage: React.FC<PaymentPageProps> = ({
         paymentCurrency: 'NGN',
         planDuration: selectedPlan,
         amount: amountVal,
+        receipt: receiptData,
       });
 
       setEmailNoticeModal({
@@ -173,30 +212,6 @@ export const PaymentPage: React.FC<PaymentPageProps> = ({
     } catch (err: any) {
       console.error(err);
       onToast('Submission failed. Please check connection and try again.', 'error');
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const handleInstantDemoActivate = async () => {
-    try {
-      setSubmitting(true);
-      await activatePaidPlan(userId, {
-        planDuration: selectedPlan,
-        paymentRef: `DEMO-INSTANT-${selectedPlan.toUpperCase()}-${Date.now()}`,
-        status: 'verified',
-        senderName: senderName.trim() || 'Demo Fast-Track',
-        bankUsed: bankUsed.trim() || 'Direct Activation',
-      });
-      setActivationSuccess(true);
-      onToast(
-        `Instant Activation: ${currentPlan.name} active! ${
-          currentPlan.isUnlimited ? 'Unlimited slots unlocked' : `${currentPlan.totalSlots} slots unlocked`
-        }!`,
-        'success'
-      );
-    } catch (err) {
-      onToast('Error activating plan', 'error');
     } finally {
       setSubmitting(false);
     }
@@ -644,6 +659,27 @@ export const PaymentPage: React.FC<PaymentPageProps> = ({
                 />
               </div>
 
+              <div className="vault-dropdown-panel rounded-xl border border-cyan-500/30 bg-slate-950/70 p-3">
+                <label className="block text-[11px] text-slate-300 mb-1.5">
+                  Payment Receipt <span className="text-cyan-400">*</span>
+                </label>
+                <label className="flex items-center gap-3 rounded-xl border border-dashed border-slate-700 hover:border-cyan-500/60 bg-slate-900/70 px-3 py-3 cursor-pointer transition-all">
+                  <Upload className="w-4 h-4 text-cyan-400 flex-shrink-0" />
+                  <span className="min-w-0 text-xs text-slate-300 truncate">
+                    {receiptFile ? receiptFile.name : 'Upload image, PDF, DOC, or DOCX receipt'}
+                  </span>
+                  <input
+                    type="file"
+                    required
+                    accept="image/png,image/jpeg,image/webp,application/pdf,.doc,.docx"
+                    onChange={handleReceiptChange}
+                    className="sr-only"
+                  />
+                </label>
+                <p className="mt-1.5 text-[10px] text-slate-500">Required for payment verification. Maximum 10MB.</p>
+                {receiptError && <p className="mt-1 text-[11px] text-rose-300">{receiptError}</p>}
+              </div>
+
               {/* 2 Working Days Notice Banner */}
               <div className="p-3 bg-cyan-950/40 border border-cyan-500/30 rounded-xl text-xs space-y-1 font-mono">
                 <div className="flex items-center space-x-1.5 text-cyan-300 font-bold text-[11px]">
@@ -669,25 +705,6 @@ export const PaymentPage: React.FC<PaymentPageProps> = ({
               </button>
             </form>
 
-            {/* Fast-Track / Demo Instant Activation */}
-            <div className="mt-5 pt-5 border-t border-slate-800">
-              <div className="text-[10px] font-mono uppercase tracking-wider text-slate-400 mb-2 flex items-center justify-between">
-                <span>Instant Review / Fast-Track</span>
-                <span className="text-cyan-400 text-[10px]">Testing Enclave</span>
-              </div>
-              <button
-                type="button"
-                onClick={handleInstantDemoActivate}
-                disabled={submitting}
-                className="w-full inline-flex items-center justify-center space-x-1.5 bg-slate-950 hover:bg-slate-900 border border-cyan-500/30 hover:border-cyan-400 text-cyan-300 text-xs py-2.5 px-3 rounded-xl transition-all cursor-pointer font-mono"
-              >
-                <Zap className="w-3.5 h-3.5 text-cyan-400" />
-                <span>⚡ Instant Activate {currentPlan.name}</span>
-              </button>
-              <p className="text-[10px] text-slate-500 mt-1.5 text-center">
-                Instantly credits slots for testing the quota limits in action.
-              </p>
-            </div>
           </div>
 
           {/* Guarantee / Support Box */}

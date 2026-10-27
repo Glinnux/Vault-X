@@ -24,6 +24,7 @@ import { AdminUsersPage } from './components/AdminUsersPage';
 import { AndroidBottomNav } from './components/AndroidBottomNav';
 import { AndroidInstallPrompt } from './components/AndroidInstallPrompt';
 import { usePWAInstall } from './hooks/usePWAInstall';
+import { useDeviceDetection } from './hooks/useDeviceDetection';
 import { CyberGridBackground } from './components/CyberGridBackground';
 import { FuturisticHudBar } from './components/FuturisticHudBar';
 import { VaultChatbot } from './components/VaultChatbot';
@@ -45,19 +46,25 @@ import {
 } from './services/subscriptionService';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { db } from './lib/firebase';
-import { isUserAdmin, ADMIN_EMAIL } from './services/adminService';
+import { subscribeToAdminsList, isSuperAdminUser, isUserAdmin, ADMIN_EMAIL } from './services/adminService';
 import { VaultCategory, VaultItem, VaultViewMode, UserSubscription } from './types/vault';
 
 function VaultApp() {
   const {
     user,
     loading: authLoading,
+    isBanned,
+    bannedReason,
     authError,
     clearAuthError,
     openAuthModal,
     signOut,
   } = useAuth();
   const { t, isAutoMode, currentLangInfo } = useLanguage();
+  const { isMobileDevice } = useDeviceDetection();
+  const [appointedAdminIds, setAppointedAdminIds] = useState<string[]>([]);
+  const [hasDirectAdminRecord, setHasDirectAdminRecord] = useState(false);
+  const [hasAdminRole, setHasAdminRole] = useState(false);
 
   // Vault state
   const [items, setItems] = useState<VaultItem[]>([]);
@@ -77,6 +84,38 @@ function VaultApp() {
 
   // Toast
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'info' | 'error' } | null>(null);
+
+  useEffect(() => {
+    if (!user) {
+      setAppointedAdminIds([]);
+      setHasDirectAdminRecord(false);
+      setHasAdminRole(false);
+      return;
+    }
+
+    const unsubscribeAdmins = subscribeToAdminsList((admins) => {
+      setAppointedAdminIds(admins.map((admin) => admin.userId));
+    });
+
+    // Check the signed-in user's own records as a fallback when the full admin
+    // collection listener is delayed or unavailable.
+    const unsubscribeAdminRecord = onSnapshot(
+      doc(db, 'admins', user.uid),
+      (snapshot) => setHasDirectAdminRecord(snapshot.exists()),
+      () => setHasDirectAdminRecord(false)
+    );
+    const unsubscribeUserRecord = onSnapshot(
+      doc(db, 'users', user.uid),
+      (snapshot) => setHasAdminRole(snapshot.data()?.role === 'admin'),
+      () => setHasAdminRole(false)
+    );
+
+    return () => {
+      unsubscribeAdmins();
+      unsubscribeAdminRecord();
+      unsubscribeUserRecord();
+    };
+  }, [user]);
 
   const showToast = (message: string, type: 'success' | 'info' | 'error' = 'success') => {
     setToast({ message, type });
@@ -107,8 +146,10 @@ function VaultApp() {
   });
 
   const isAdmin = Boolean(
-    isUserAdmin(user?.email, user?.uid) ||
-    (user?.email && user.email.toLowerCase() === ADMIN_EMAIL.toLowerCase())
+    isSuperAdminUser(user?.email) ||
+    (user?.uid && appointedAdminIds.includes(user.uid)) ||
+    hasDirectAdminRecord ||
+    hasAdminRole
   );
   const isAccountUnrestricted = Boolean(
     isAdmin ||
@@ -118,6 +159,14 @@ function VaultApp() {
 
   // Real-time Vault subscription for the signed-in user
   useEffect(() => {
+    if (authLoading) return;
+
+    if (isBanned) {
+      setItems([]);
+      setLoadingItems(false);
+      return;
+    }
+
     if (!user) {
       setItems([]);
       setLoadingItems(false);
@@ -166,7 +215,7 @@ function VaultApp() {
       unsubscribeVault();
       unsubscribeSub();
     };
-  }, [user]);
+  }, [user, isBanned, authLoading]);
 
   // Counts for header tabs
   const counts = useMemo(() => {
@@ -211,14 +260,14 @@ function VaultApp() {
       return;
     }
 
-    const currentCredentialCount = items.filter((it) => it.type === 'credential').length;
-    if (!isAccountUnrestricted && payload.type === 'credential' && currentCredentialCount >= subscription.maxCredentialSlots) {
+    const usedSlots = items.length;
+    if (!isAccountUnrestricted && usedSlots >= subscription.maxCredentialSlots) {
       showToast(
-        `Slot limit reached (${subscription.maxCredentialSlots} max on ${subscription.plan === 'paid' ? 'paid' : 'free'} plan). Please upgrade!`,
+        `Vault item limit reached (${subscription.maxCredentialSlots} slots on the ${subscription.plan === 'paid' ? 'paid' : 'free'} plan). Please upgrade!`,
         'error'
       );
       setViewMode('payment');
-      throw new Error(`Credential slot limit reached (${subscription.maxCredentialSlots} max).`);
+      throw new Error(`Vault item slot limit reached (${subscription.maxCredentialSlots} max).`);
     }
 
     try {
@@ -270,8 +319,49 @@ function VaultApp() {
     }
   };
 
+  if (isBanned) {
+    const appealSubject = `Appeal account restriction - UID ${user?.uid || ''}`;
+    const appealBody = `Hello Vault X administrator,\n\nI would like to appeal the restriction on my account.\n\nUser UID: ${user?.uid || 'Unknown'}\nEmail: ${user?.email || 'Unknown'}\nReason shown: ${bannedReason || 'Not provided'}\n\nThank you.`;
+
+    return (
+      <div className={`app-shell ${isMobileDevice ? 'device-mobile' : 'device-desktop'} min-h-screen bg-[#090d16] text-slate-100 flex flex-col font-sans`}>
+        <VaultHeader
+          currentView="all"
+          onSelectView={() => {}}
+          counts={counts}
+          isPaid={false}
+          isUnlimited={false}
+        isAdmin={false}
+        />
+        <main className="flex-1 w-full max-w-xl mx-auto px-4 sm:px-6 py-10 sm:py-16 flex items-center">
+          <section className="w-full p-5 sm:p-8 rounded-2xl bg-rose-950/40 border border-rose-500/50 text-center space-y-4">
+            <AlertTriangle className="w-12 h-12 text-rose-400 mx-auto" />
+            <h1 className="text-xl sm:text-2xl font-bold text-white">Account access suspended</h1>
+            <p className="text-sm text-slate-300 leading-relaxed">
+              This account is restricted by the administrator. Vault items cannot be viewed or changed while the restriction is active.
+              {bannedReason ? ` Reason: ${bannedReason}` : ''}
+            </p>
+            <p className="text-xs text-slate-400">
+              To appeal, contact the administrator. Access will return only after the restriction is lifted.
+            </p>
+            <a
+              href={`mailto:${ADMIN_EMAIL}?subject=${encodeURIComponent(appealSubject)}&body=${encodeURIComponent(appealBody)}`}
+              className="inline-flex min-h-11 items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-rose-700 hover:bg-rose-600 text-white font-semibold text-sm"
+            >
+              <ExternalLink className="w-4 h-4" />
+              Appeal to administrator
+            </a>
+          </section>
+        </main>
+        <footer className="site-chrome border-t border-emerald-950 py-4 px-4 text-center text-xs text-slate-400">
+          Vault X account access notice
+        </footer>
+      </div>
+    );
+  }
+
   return (
-    <div className="app-shell min-h-screen bg-[#090d16] text-slate-100 flex flex-col font-sans selection:bg-cyan-500 selection:text-black relative">
+    <div className={`app-shell ${isMobileDevice ? 'device-mobile' : 'device-desktop'} min-h-screen bg-[#090d16] text-slate-100 flex flex-col font-sans selection:bg-cyan-500 selection:text-black relative`}>
       {/* Ambient Futuristic Cyber Grid & Particle Canvas */}
       <CyberGridBackground />
 
@@ -282,12 +372,13 @@ function VaultApp() {
         counts={counts}
         isPaid={subscription.plan === 'paid'}
         isUnlimited={isAccountUnrestricted}
+        isAdmin={isAdmin}
         onInstallApp={installApp}
         isInstallable={isInstallable}
       />
 
       {/* Main Content (with bottom padding for Android navigation bar) */}
-      <main className="flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 pb-28 md:pb-8 relative z-10">
+      <main className={`flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 ${isMobileDevice ? 'pb-28' : 'pb-8'} relative z-10`}>
         {/* Android PWA Install Banner */}
         <AndroidInstallPrompt />
 
@@ -357,7 +448,7 @@ function VaultApp() {
             userId={user?.uid || ''}
             userEmail={user?.email || ''}
             subscription={subscription}
-            credentialCount={counts.credentials}
+            credentialCount={counts.all}
             isUnlimited={isAccountUnrestricted}
             onBackToVault={() => setViewMode('all')}
             onToast={(msg, type) => showToast(msg, type)}
@@ -561,7 +652,7 @@ function VaultApp() {
               </div>
             ) : (
               /* Grid of Vault Items */
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
+              <div className="vault-stagger-grid grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
                 {filteredItems.map((item, index) => {
                   const editable = canEditSlotItem(index, subscription, isAccountUnrestricted);
                   return (
@@ -600,7 +691,7 @@ function VaultApp() {
           {user && (
             <div className="w-full lg:w-72 xl:w-80 flex-shrink-0">
               <SlotUpgradeSideBox
-                credentialCount={counts.credentials}
+                credentialCount={counts.all}
                 maxSlots={isAccountUnrestricted ? UNLIMITED_CREDENTIAL_SLOTS : subscription.maxCredentialSlots}
                 isPaid={subscription.plan === 'paid'}
                 isUnlimited={isAccountUnrestricted}
@@ -635,7 +726,7 @@ function VaultApp() {
         isOpen={isAddModalOpen}
         onClose={() => setIsAddModalOpen(false)}
         onAdd={handleCreateItem}
-        credentialCount={counts.credentials}
+        credentialCount={counts.all}
         maxSlots={isAccountUnrestricted ? UNLIMITED_CREDENTIAL_SLOTS : subscription.maxCredentialSlots}
         isUnlimited={isAccountUnrestricted}
         onNavigateToPayment={() => setViewMode('payment')}
@@ -650,7 +741,7 @@ function VaultApp() {
       />
 
       {/* AI Storage Guide Chatbot - Only available when signed in */}
-      {user && (
+      {user && isMobileDevice && (
         <VaultChatbot
           isOpenExternal={isChatbotOpen}
           onToggleOpen={(open) => setIsChatbotOpen(open)}

@@ -16,7 +16,7 @@ const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 const SUPPORT_EMAIL = 'oluwolefaith92@gmail.com';
 
-app.use(express.json());
+app.use(express.json({ limit: '12mb' }));
 
 // Initialize Gemini SDK with User-Agent telemetry
 const apiKey = process.env.GEMINI_API_KEY;
@@ -259,6 +259,9 @@ export interface StoredPayment {
   timestamp: number;
   emailDeliveryStatus?: string;
   emailDeliveryMethod?: string;
+  receiptName?: string;
+  receiptType?: string;
+  receiptSize?: number;
 }
 
 export interface StoredTicket {
@@ -359,6 +362,7 @@ async function dispatchEmailNotification({
   textContent,
   htmlContent,
   recipientEmail = SUPPORT_EMAIL,
+  attachments,
 }: {
   subject: string;
   replyTo?: string;
@@ -366,6 +370,7 @@ async function dispatchEmailNotification({
   textContent: string;
   htmlContent?: string;
   recipientEmail?: string;
+  attachments?: Array<{ filename: string; content: Buffer; contentType?: string }>;
 }): Promise<{ sent: boolean; method: string; message: string }> {
   const smtpHost = process.env.SMTP_HOST;
   const smtpUser = process.env.SMTP_USER || process.env.EMAIL_USER;
@@ -391,6 +396,7 @@ async function dispatchEmailNotification({
         subject,
         text: textContent,
         html: htmlContent || `<pre style="font-family:sans-serif;white-space:pre-wrap;">${textContent}</pre>`,
+        attachments,
       });
 
       console.log(`[Email Dispatch] SMTP delivered email to ${recipientEmail}`);
@@ -504,10 +510,22 @@ app.get('/api/admin/support-tickets', (_req: Request, res: Response) => {
 // Endpoint to handle bank transfer payment submission with user UID and send confirmation email notice
 app.post('/api/payment-submission', async (req: Request, res: Response) => {
   try {
-    const { userId, userEmail, senderName, bankUsed, paymentRef, planDuration = 'biweekly', amount } = req.body;
+    const { userId, userEmail, senderName, bankUsed, paymentRef, planDuration = 'biweekly', amount, receipt } = req.body;
 
-    if (!senderName || !bankUsed) {
-      res.status(400).json({ error: 'Sender name and bank used in transfer are required.' });
+    if (!senderName || !bankUsed || !receipt?.name || !receipt?.data) {
+      res.status(400).json({ error: 'Sender name, bank used, and a payment receipt are required.' });
+      return;
+    }
+
+    const safeReceiptName = String(receipt.name).replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 160);
+    const receiptSize = Number(receipt.size) || 0;
+    if (receiptSize <= 0 || receiptSize > 10 * 1024 * 1024 || typeof receipt.data !== 'string') {
+      res.status(400).json({ error: 'Receipt must be a valid file of 10MB or less.' });
+      return;
+    }
+    const receiptBuffer = Buffer.from(receipt.data, 'base64');
+    if (!receiptBuffer.length || receiptBuffer.length > 10 * 1024 * 1024) {
+      res.status(400).json({ error: 'Receipt file could not be validated.' });
       return;
     }
 
@@ -545,6 +563,7 @@ Allotted Slots:        ${planSlots}
 Sender / Depositor:    ${senderName}
 Bank Used in Transfer: ${bankUsed}
 Payment Reference:     ${paymentRef || 'N/A'}
+Receipt:               ${safeReceiptName} (${Math.round(receiptBuffer.length / 1024)} KB)
 Amount Transferred:    ${formattedAmount}
 Currency:              NGN (Nigerian Naira)
 Submission Time:       ${submittedAt}
@@ -601,10 +620,12 @@ Quantum-Resistant Isolated Storage`;
         Bank_Used: bankUsed,
         Amount: formattedAmount,
         Payment_Reference: paymentRef || 'N/A',
+        Receipt_File: safeReceiptName,
         Submission_Date: submittedAt,
         Notice_To_Customer: 'Payment would be confirmed within 2 working days',
       },
       textContent: adminEmailBody,
+      attachments: [{ filename: safeReceiptName, content: receiptBuffer, contentType: String(receipt.type || 'application/octet-stream') }],
     });
 
     // 2. Also try sending confirmation to the user if userEmail is provided and SMTP is set up
@@ -620,6 +641,7 @@ Quantum-Resistant Isolated Storage`;
           Notice: 'Your payment would be confirmed within 2 working days',
         },
         textContent: customerEmailContent,
+          attachments: [{ filename: safeReceiptName, content: receiptBuffer, contentType: String(receipt.type || 'application/octet-stream') }],
       });
     }
 
@@ -641,6 +663,9 @@ Quantum-Resistant Isolated Storage`;
       timestamp: Date.now(),
       emailDeliveryStatus: adminDelivery.message,
       emailDeliveryMethod: adminDelivery.method,
+      receiptName: safeReceiptName,
+      receiptType: String(receipt.type || 'application/octet-stream'),
+      receiptSize: receiptBuffer.length,
     };
     savePaymentSubmission(paymentRecord);
 

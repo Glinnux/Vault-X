@@ -97,7 +97,7 @@ export const AdminUsersPage: React.FC<AdminUsersPageProps> = ({
 
   // Primary Navigation Tabs: Redesigned into separate, non-confusing distinct tabs
   const [activeTab, setActiveTab] = useState<
-    'payments' | 'suggestions' | 'complaints' | 'feedback' | 'admins' | 'users'
+    'payments' | 'suggestions' | 'complaints' | 'feedback' | 'admins' | 'users' | 'resolved'
   >('payments');
 
   // Bank Transfer Sub-tabs: 'notifications' (pending queue) vs 'resolved' (verified audit archive)
@@ -111,6 +111,7 @@ export const AdminUsersPage: React.FC<AdminUsersPageProps> = ({
   const [tickets, setTickets] = useState<SupportTicket[]>([]);
   const [serverPayments, setServerPayments] = useState<ServerPaymentRecord[]>([]);
   const [adminsList, setAdminsList] = useState<AdminRecord[]>([]);
+  const [adminsListLoaded, setAdminsListLoaded] = useState(false);
 
   // Loading States
   const [loadingUsers, setLoadingUsers] = useState(true);
@@ -149,9 +150,42 @@ export const AdminUsersPage: React.FC<AdminUsersPageProps> = ({
 
   // Check current user's role and granular permissions
   const isSuperAdmin = isSuperAdminUser(user?.email);
+  const isAppointedAdmin = Boolean(user?.uid && adminsList.some((admin) => admin.userId === user.uid));
   const currentAdminPerms: AdminPermissions = useMemo(() => {
+    if (isSuperAdmin) return SUPER_ADMIN_PERMISSIONS;
+    if (!isAppointedAdmin) {
+      return {
+        viewFullUserInfo: false,
+        giveSlots: false,
+        answerComplaints: false,
+        redirectSuggestions: false,
+        viewTransactions: false,
+        banUsers: false,
+        addAdmins: false,
+        receiveTransactionNotices: false,
+      };
+    }
     return getAdminPermissions(user?.uid, user?.email);
-  }, [user, adminsList]);
+  }, [user, adminsList, isSuperAdmin, isAppointedAdmin]);
+
+  const availableAdminTabs = useMemo(() => {
+    const canViewPayments = isSuperAdmin || currentAdminPerms.viewTransactions || currentAdminPerms.receiveTransactionNotices;
+    const canViewSuggestions = isSuperAdmin || currentAdminPerms.answerComplaints || currentAdminPerms.redirectSuggestions;
+    const canViewTickets = isSuperAdmin || currentAdminPerms.answerComplaints;
+    const canViewUsers = isSuperAdmin || currentAdminPerms.viewFullUserInfo || currentAdminPerms.giveSlots || currentAdminPerms.banUsers || currentAdminPerms.addAdmins;
+    const canViewResolved = isSuperAdmin || currentAdminPerms.viewTransactions || currentAdminPerms.receiveTransactionNotices ||
+      currentAdminPerms.answerComplaints || currentAdminPerms.redirectSuggestions;
+
+    return [
+      { id: 'payments' as const, label: 'Bank Transfer Queue', allowed: canViewPayments },
+      { id: 'suggestions' as const, label: 'Suggestions', allowed: canViewSuggestions },
+      { id: 'complaints' as const, label: 'Complaints', allowed: canViewTickets },
+      { id: 'feedback' as const, label: 'Feedback & Inquiries', allowed: canViewTickets },
+      { id: 'resolved' as const, label: 'Resolved', allowed: canViewResolved },
+      { id: 'admins' as const, label: 'Appoint & Manage Admins', allowed: isSuperAdmin || currentAdminPerms.addAdmins },
+      { id: 'users' as const, label: 'Registered Accounts', allowed: canViewUsers },
+    ].filter((tab) => tab.allowed);
+  }, [isSuperAdmin, currentAdminPerms]);
 
   // Live 1-second ticker for admin countdown timers
   const [, setTicker] = useState(0);
@@ -164,6 +198,15 @@ export const AdminUsersPage: React.FC<AdminUsersPageProps> = ({
 
   // 1. Subscribe to registered users
   useEffect(() => {
+    const canViewUsers = isSuperAdmin || (
+      isAppointedAdmin &&
+      (currentAdminPerms.viewFullUserInfo || currentAdminPerms.giveSlots || currentAdminPerms.banUsers || currentAdminPerms.addAdmins)
+    );
+    if (!canViewUsers) {
+      setUsers([]);
+      setLoadingUsers(false);
+      return;
+    }
     setLoadingUsers(true);
     const unsubscribe = subscribeToRegisteredUsers(
       (userList) => {
@@ -176,25 +219,44 @@ export const AdminUsersPage: React.FC<AdminUsersPageProps> = ({
       }
     );
     return () => unsubscribe();
-  }, []);
+  }, [isSuperAdmin, isAppointedAdmin, currentAdminPerms]);
 
   // 2. Subscribe to support tickets
   useEffect(() => {
+    const canViewTickets = isSuperAdmin || (
+      isAppointedAdmin && (currentAdminPerms.answerComplaints || currentAdminPerms.redirectSuggestions)
+    );
+    if (!canViewTickets) {
+      setTickets([]);
+      setLoadingTickets(false);
+      return;
+    }
     setLoadingTickets(true);
     const unsubscribe = subscribeToAllTickets((ticketList) => {
       setTickets(ticketList);
       setLoadingTickets(false);
     });
     return () => unsubscribe();
-  }, []);
+  }, [isSuperAdmin, isAppointedAdmin, currentAdminPerms]);
 
   // 3. Subscribe to admins list
   useEffect(() => {
     const unsubscribe = subscribeToAdminsList((list) => {
       setAdminsList(list);
+      setAdminsListLoaded(true);
     });
     return () => unsubscribe();
   }, []);
+
+  useEffect(() => {
+    if (!isSuperAdmin && adminsListLoaded && (!isAppointedAdmin || availableAdminTabs.length === 0)) {
+      onBackToVault();
+      return;
+    }
+    if (!isSuperAdmin && availableAdminTabs.length > 0 && !availableAdminTabs.some((tab) => tab.id === activeTab)) {
+      setActiveTab(availableAdminTabs[0].id);
+    }
+  }, [isSuperAdmin, adminsListLoaded, isAppointedAdmin, availableAdminTabs, activeTab, onBackToVault]);
 
   // 4. Fetch server-audited payments
   const loadPayments = async () => {
@@ -205,8 +267,16 @@ export const AdminUsersPage: React.FC<AdminUsersPageProps> = ({
   };
 
   useEffect(() => {
-    loadPayments();
-  }, []);
+    const canViewPayments = isSuperAdmin || (
+      isAppointedAdmin && (currentAdminPerms.viewTransactions || currentAdminPerms.receiveTransactionNotices)
+    );
+    if (!canViewPayments) {
+      setServerPayments([]);
+      setLoadingPayments(false);
+      return;
+    }
+    void loadPayments();
+  }, [isSuperAdmin, isAppointedAdmin, currentAdminPerms]);
 
   const handleCopyUid = (uid: string) => {
     navigator.clipboard.writeText(uid);
@@ -588,6 +658,16 @@ export const AdminUsersPage: React.FC<AdminUsersPageProps> = ({
   // Helper for masking user info if viewFullUserInfo is false
   const canViewFullUserInfo = isSuperAdmin || currentAdminPerms.viewFullUserInfo;
 
+  const resolvedTickets = useMemo(() => {
+    const queryText = search.trim().toLowerCase();
+    return tickets.filter((ticket) => {
+      if (ticket.status !== 'resolved') return false;
+      if (!queryText) return true;
+      return [ticket.subject, ticket.message, ticket.userEmail, ticket.userId]
+        .some((value) => value.toLowerCase().includes(queryText));
+    });
+  }, [tickets, search]);
+
   return (
     <div className="space-y-6 animate-in fade-in pb-16">
       {/* Top Header */}
@@ -636,7 +716,8 @@ export const AdminUsersPage: React.FC<AdminUsersPageProps> = ({
         </div>
       </div>
 
-      {/* Metrics Row */}
+      {/* Detailed metrics are reserved for the superadmin; appointed admins see only permitted tabs. */}
+      {isSuperAdmin && (
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
         {/* Metric 1: Pending Bank Transfers */}
         <div
@@ -754,106 +835,46 @@ export const AdminUsersPage: React.FC<AdminUsersPageProps> = ({
           <span className="text-[10px] text-slate-400">UID Directory</span>
         </div>
       </div>
+      )}
 
       {/* Main Distinct Tab Navigation Bar (Separating each feature into distinct tabs) */}
-      <div className="flex items-center space-x-1.5 overflow-x-auto pb-1 border-b border-slate-800 text-xs">
-        {/* Tab 1: Bank Transfer Verification */}
-        <button
-          onClick={() => setActiveTab('payments')}
-          className={`flex items-center space-x-2 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all cursor-pointer whitespace-nowrap ${
-            activeTab === 'payments'
-              ? 'bg-emerald-950/80 text-emerald-200 border border-emerald-500/50 shadow-md'
-              : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-          }`}
-        >
-          <CreditCard className="w-4 h-4 text-emerald-400" />
-          <span>Bank Transfer Queue</span>
-          {pendingPayments.length > 0 && (
-            <span className="text-[10px] px-2 py-0.5 bg-amber-500/20 border border-amber-500/40 text-amber-300 rounded-full font-mono font-bold animate-pulse">
-              {pendingPayments.length} NEW
-            </span>
-          )}
-        </button>
-
-        {/* Tab 2: Suggestions (SEPARATE TAB) */}
-        <button
-          onClick={() => setActiveTab('suggestions')}
-          className={`flex items-center space-x-2 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all cursor-pointer whitespace-nowrap ${
-            activeTab === 'suggestions'
-              ? 'bg-amber-950/80 text-amber-200 border border-amber-500/50 shadow-md'
-              : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-          }`}
-        >
-          <Lightbulb className="w-4 h-4 text-amber-400" />
-          <span>Suggestions</span>
-          <span className="text-[10px] px-2 py-0.5 bg-amber-950 border border-amber-700/50 rounded-full font-mono text-amber-300">
-            {suggestionTickets.length}
-          </span>
-        </button>
-
-        {/* Tab 3: Complaints (SEPARATE TAB) */}
-        <button
-          onClick={() => setActiveTab('complaints')}
-          className={`flex items-center space-x-2 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all cursor-pointer whitespace-nowrap ${
-            activeTab === 'complaints'
-              ? 'bg-rose-950/80 text-rose-200 border border-rose-500/50 shadow-md'
-              : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-          }`}
-        >
-          <AlertTriangle className="w-4 h-4 text-rose-400" />
-          <span>Complaints</span>
-          <span className="text-[10px] px-2 py-0.5 bg-rose-950 border border-rose-700/50 rounded-full font-mono text-rose-300">
-            {complaintTickets.length}
-          </span>
-        </button>
-
-        {/* Tab 4: General Feedback & Inquiries (SEPARATE TAB) */}
-        <button
-          onClick={() => setActiveTab('feedback')}
-          className={`flex items-center space-x-2 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all cursor-pointer whitespace-nowrap ${
-            activeTab === 'feedback'
-              ? 'bg-cyan-950/80 text-cyan-200 border border-cyan-500/50 shadow-md'
-              : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-          }`}
-        >
-          <MessageSquare className="w-4 h-4 text-cyan-400" />
-          <span>Feedback & Inquiries</span>
-          <span className="text-[10px] px-2 py-0.5 bg-cyan-950 border border-cyan-700/50 rounded-full font-mono text-cyan-300">
-            {feedbackTickets.length}
-          </span>
-        </button>
-
-        {/* Tab 5: Appoint & Manage Admins (SEPARATE DEDICATED PAGE/TAB) */}
-        <button
-          onClick={() => setActiveTab('admins')}
-          className={`flex items-center space-x-2 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all cursor-pointer whitespace-nowrap ${
-            activeTab === 'admins'
-              ? 'bg-purple-950/80 text-purple-200 border border-purple-500/50 shadow-md'
-              : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-          }`}
-        >
-          <ShieldCheck className="w-4 h-4 text-purple-400" />
-          <span>Appoint & Manage Admins</span>
-          <span className="text-[10px] px-2 py-0.5 bg-purple-950 border border-purple-700/50 rounded-full font-mono text-purple-300">
-            {adminsList.length > 0 ? adminsList.length : 1}
-          </span>
-        </button>
-
-        {/* Tab 6: Registered Accounts (UID Directory) */}
-        <button
-          onClick={() => setActiveTab('users')}
-          className={`flex items-center space-x-2 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all cursor-pointer whitespace-nowrap ${
-            activeTab === 'users'
-              ? 'bg-indigo-950/80 text-indigo-200 border border-indigo-500/50 shadow-md'
-              : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-          }`}
-        >
-          <Users className="w-4 h-4 text-indigo-400" />
-          <span>Registered Accounts (UIDs)</span>
-          <span className="text-[10px] px-2 py-0.5 bg-indigo-950 border border-indigo-700/50 rounded-full font-mono text-indigo-300">
-            {users.length}
-          </span>
-        </button>
+      <div className="flex items-center gap-1.5 overflow-x-auto pb-1 border-b border-slate-800 text-xs">
+        {availableAdminTabs.map((tab) => {
+          const TabIcon = {
+            payments: CreditCard,
+            suggestions: Lightbulb,
+            complaints: AlertTriangle,
+            feedback: MessageSquare,
+            resolved: CheckCheck,
+            admins: ShieldCheck,
+            users: Users,
+          }[tab.id];
+          return (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              aria-current={activeTab === tab.id ? 'page' : undefined}
+              className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all whitespace-nowrap ${
+                activeTab === tab.id
+                  ? 'bg-indigo-950/80 text-indigo-200 border border-indigo-500/50 shadow-md'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+              }`}
+            >
+              <TabIcon className="w-4 h-4" />
+              <span>{tab.label}</span>
+              {tab.id === 'payments' && pendingPayments.length > 0 && (
+                <span className="text-[10px] px-2 py-0.5 bg-amber-500/20 border border-amber-500/40 text-amber-300 rounded-full font-mono font-bold">
+                  {pendingPayments.length}
+                </span>
+              )}
+              {tab.id === 'resolved' && (
+                <span className="text-[10px] px-2 py-0.5 bg-emerald-950 border border-emerald-700/50 rounded-full font-mono text-emerald-300">
+                  {resolvedPayments.length + tickets.filter((ticket) => ticket.status === 'resolved').length}
+                </span>
+              )}
+            </button>
+          );
+        })}
       </div>
 
       {/* Global Filter Bar for Current Tab */}
@@ -874,11 +895,60 @@ export const AdminUsersPage: React.FC<AdminUsersPageProps> = ({
               ? 'Search feedback & inquiries by user message or UID...'
               : activeTab === 'admins'
               ? 'Search administrators by email, name, or UID...'
+              : activeTab === 'resolved'
+              ? 'Search resolved issues and verified payments...'
               : 'Search registered accounts by UID, email, or display name...'
           }
           className="w-full bg-slate-900/80 border border-slate-800 focus:border-cyan-500 rounded-xl pl-10 pr-4 py-2.5 text-xs text-white placeholder-slate-500 outline-none transition-all shadow-inner"
         />
       </div>
+
+      {/* ============================================================== */}
+      {activeTab === 'resolved' && (
+        <section className="space-y-5">
+          <div>
+            <h3 className="text-lg font-bold text-white flex items-center gap-2">
+              <CheckCheck className="w-5 h-5 text-emerald-400" />
+              Resolved
+            </h3>
+            <p className="text-xs text-slate-400 mt-1">Resolved support issues and verified payment records are archived here.</p>
+          </div>
+          {(isSuperAdmin || currentAdminPerms.viewTransactions || currentAdminPerms.receiveTransactionNotices) && (
+            <div className="space-y-2">
+              <h4 className="text-sm font-semibold text-emerald-300">Verified payments ({resolvedPayments.length})</h4>
+              {resolvedPayments.map((payment) => (
+                <article key={payment.id} className="p-3 rounded-xl border border-emerald-500/20 bg-emerald-950/20 text-xs">
+                  <div className="flex flex-wrap justify-between gap-2">
+                    <strong className="text-white">{payment.formattedAmount} · {payment.senderName}</strong>
+                    <span className="text-emerald-300">Verified</span>
+                  </div>
+                  <p className="text-slate-400 mt-1">Reference: {payment.paymentRef || 'N/A'} · UID: {payment.userId}</p>
+                </article>
+              ))}
+              {resolvedPayments.length === 0 && <p className="text-xs text-slate-500">No verified payments.</p>}
+            </div>
+          )}
+          {(isSuperAdmin || currentAdminPerms.answerComplaints || currentAdminPerms.redirectSuggestions) && (
+            <div className="space-y-2">
+              <h4 className="text-sm font-semibold text-cyan-300">Resolved issues ({resolvedTickets.length})</h4>
+              {resolvedTickets.map((ticket) => (
+                <article key={ticket.id} className="p-3 rounded-xl border border-cyan-500/20 bg-slate-900/70 text-xs">
+                  <div className="flex flex-wrap justify-between gap-2">
+                    <strong className="text-white">{ticket.subject}</strong>
+                    <span className="text-emerald-300">Resolved · {ticket.type}</span>
+                  </div>
+                  <p className="text-slate-300 mt-1 whitespace-pre-wrap break-words">{ticket.message}</p>
+                  <p className="text-slate-500 mt-2">
+                    UID: {ticket.userId}
+                    {canViewFullUserInfo ? ` · ${ticket.userEmail}` : ''}
+                  </p>
+                </article>
+              ))}
+              {resolvedTickets.length === 0 && <p className="text-xs text-slate-500">No resolved issues.</p>}
+            </div>
+          )}
+        </section>
+      )}
 
       {/* ============================================================== */}
       {/* SECTION 1: BANK TRANSFER VERIFICATION QUEUE                    */}
@@ -887,7 +957,7 @@ export const AdminUsersPage: React.FC<AdminUsersPageProps> = ({
       {activeTab === 'payments' && (
         <div className="space-y-4">
           {/* Permission check: viewTransactions */}
-          {!isSuperAdmin && !currentAdminPerms.viewTransactions ? (
+          {!isSuperAdmin && !currentAdminPerms.viewTransactions && !currentAdminPerms.receiveTransactionNotices ? (
             <div className="py-12 px-6 rounded-2xl bg-slate-900/80 border border-rose-500/40 text-center space-y-2">
               <Lock className="w-10 h-10 text-rose-400 mx-auto" />
               <h3 className="text-base font-bold text-white">Access Restricted: View Transactions Disabled</h3>

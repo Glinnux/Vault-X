@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { doc, onSnapshot } from 'firebase/firestore';
 import {
   LogOut,
   Lock,
@@ -13,7 +14,8 @@ import { VaultXLogo } from './VaultXLogo';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 import { LanguageSelector } from './LanguageSelector';
-import { isUserAdmin } from '../services/adminService';
+import { isSuperAdminUser, isUserAdmin } from '../services/adminService';
+import { db } from '../lib/firebase';
 import { VaultViewMode } from '../types/vault';
 
 interface VaultHeaderProps {
@@ -27,6 +29,7 @@ interface VaultHeaderProps {
   };
   isPaid?: boolean;
   isUnlimited?: boolean;
+  isAdmin?: boolean;
   onInstallApp?: () => void;
   isInstallable?: boolean;
 }
@@ -37,13 +40,37 @@ export const VaultHeader: React.FC<VaultHeaderProps> = ({
   counts,
   isPaid,
   isUnlimited,
+  isAdmin: isAdminProp,
   onInstallApp,
   isInstallable,
 }) => {
-  const { user, openAuthModal, signOut, loading } = useAuth();
+  const { user, openAuthModal, signOut, loading, isBanned } = useAuth();
   const { t, isAutoMode, currentLangInfo } = useLanguage();
-  const isAdmin = isUserAdmin(user?.email, user?.uid);
+  const [hasAppointedAdminRecord, setHasAppointedAdminRecord] = useState(false);
   const [pendingPaymentsCount, setPendingPaymentsCount] = useState(0);
+
+  useEffect(() => {
+    if (!user || isBanned) {
+      setHasAppointedAdminRecord(false);
+      return;
+    }
+
+    return onSnapshot(
+      doc(db, 'admins', user.uid),
+      (snapshot) => setHasAppointedAdminRecord(snapshot.exists()),
+      (error) => {
+        console.warn('Could not verify appointed admin access:', error);
+        setHasAppointedAdminRecord(false);
+      }
+    );
+  }, [user?.uid, isBanned]);
+
+  const isAdmin = !isBanned && Boolean(
+    isAdminProp ||
+    hasAppointedAdminRecord ||
+    isSuperAdminUser(user?.email) ||
+    isUserAdmin(user?.email, user?.uid)
+  );
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -65,7 +92,7 @@ export const VaultHeader: React.FC<VaultHeaderProps> = ({
   }, [isAdmin]);
 
   return (
-    <header className="site-chrome sticky top-0 z-30 bg-[#040e08]/90 backdrop-blur-xl border-b border-emerald-900/40 text-white shadow-xl shadow-black/10">
+    <header className="site-chrome vault-header-enter sticky top-0 z-30 bg-[#040e08]/90 backdrop-blur-xl border-b border-emerald-900/40 text-white shadow-xl shadow-black/10">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
         {/* Main top bar */}
         <div className="h-16 flex items-center justify-between">
@@ -74,7 +101,7 @@ export const VaultHeader: React.FC<VaultHeaderProps> = ({
             className="flex items-center space-x-3 cursor-pointer group"
             onClick={() => onSelectView('all')}
           >
-            <div className="relative">
+            <div className="vault-brand-logo relative self-center translate-y-1">
               <VaultXLogo size={64} showGlow={true} />
               <span className="absolute -top-1 -right-1 flex h-2.5 w-2.5">
                 <span className="animate-radar-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>

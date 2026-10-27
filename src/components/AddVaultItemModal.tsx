@@ -6,7 +6,6 @@ import {
   FileText,
   Eye,
   EyeOff,
-  Globe,
   Tag,
   Star,
   Check,
@@ -64,12 +63,11 @@ export const AddVaultItemModal: React.FC<AddVaultItemModalProps> = ({
 }) => {
   const { user } = useAuth();
   const [type, setType] = useState<VaultItemType>('credential');
-  const isSlotLimitReached = !isUnlimited && type === 'credential' && credentialCount >= maxSlots;
+  const isSlotLimitReached = !isUnlimited && credentialCount >= maxSlots;
   const [title, setTitle] = useState('');
   const [service, setService] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const [url, setUrl] = useState('');
   const [category, setCategory] = useState<VaultCategory>('social');
   const [notes, setNotes] = useState('');
   const [favorite, setFavorite] = useState(false);
@@ -87,7 +85,6 @@ export const AddVaultItemModal: React.FC<AddVaultItemModalProps> = ({
   const handleSelectPreset = (preset: typeof PRESETS[0]) => {
     setService(preset.name);
     setTitle(`${preset.name} Account`);
-    setUrl(preset.url);
     setCategory(preset.category);
     setType('credential');
   };
@@ -111,7 +108,7 @@ export const AddVaultItemModal: React.FC<AddVaultItemModalProps> = ({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isSlotLimitReached) {
-      setError(`Slot limit reached (${maxSlots} credentials). Please upgrade for 20 more slots.`);
+      setError(`All ${maxSlots} vault item slots are in use. Please upgrade for more slots.`);
       return;
     }
     if (!title.trim()) {
@@ -138,7 +135,6 @@ export const AddVaultItemModal: React.FC<AddVaultItemModalProps> = ({
         service: service.trim() || undefined,
         username: username.trim() || undefined,
         password: password || undefined,
-        url: url.trim() || undefined,
         category,
         notes: notes.trim() || undefined,
         imageUrl: uploadedImageInfo?.url,
@@ -225,10 +221,10 @@ export const AddVaultItemModal: React.FC<AddVaultItemModalProps> = ({
               <AlertTriangle className="w-5 h-5 text-rose-400 flex-shrink-0 mt-0.5" />
               <div className="flex-1">
                 <div className="text-xs font-bold text-white tracking-wide">
-                  CREDENTIAL SLOT LIMIT REACHED ({credentialCount}/{maxSlots})
+                  VAULT ITEM SLOT LIMIT REACHED ({credentialCount}/{maxSlots})
                 </div>
                 <p className="text-[11px] text-slate-300 mt-1 leading-relaxed">
-                  You have filled all <strong>{maxSlots} credential slots</strong>. Upgrade with plans starting at <strong>₦2,000 Naira</strong> to allot <strong>extra slots (up to unlimited)</strong>.
+                  You have filled all <strong>{maxSlots} vault item slots</strong>. Each credential or document uses one slot. Upgrade with plans starting at <strong>₦2,000 Naira</strong> to allot <strong>extra slots (up to unlimited)</strong>.
                 </p>
                 {onNavigateToPayment && (
                   <button
@@ -360,21 +356,6 @@ export const AddVaultItemModal: React.FC<AddVaultItemModalProps> = ({
                 )}
               </div>
 
-              {/* Website URL */}
-              <div>
-                <label className="block text-xs font-medium text-slate-300 mb-1 flex items-center gap-1">
-                  <Globe className="w-3.5 h-3.5 text-slate-500" />
-                  Website / Service URL
-                </label>
-                <input
-                  type="url"
-                  value={url}
-                  onChange={(e) => setUrl(e.target.value)}
-                  placeholder="https://accounts.google.com"
-                  maxLength={1024}
-                  className="w-full bg-slate-950 border border-slate-700/80 focus:border-indigo-500 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 outline-none"
-                />
-              </div>
             </>
           )}
 

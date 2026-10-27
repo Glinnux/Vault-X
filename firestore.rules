@@ -29,6 +29,13 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userId;
     }
 
+    function isAccountBanned(userId) {
+      let userPath = /databases/$(database)/documents/users/$(userId);
+      return exists(userPath) &&
+        get(userPath).data.keys().hasAny(['isBanned']) &&
+        get(userPath).data.isBanned == true;
+    }
+
     function isSuperAdmin() {
       return isSignedIn() && request.auth.token.email != null && (
         request.auth.token.email.lower() == 'oluwolefaith92@gmail.com' ||
@@ -41,6 +48,22 @@ service cloud.firestore {
         isSuperAdmin() ||
         exists(/databases/$(database)/documents/admins/$(request.auth.uid))
       );
+    }
+
+    function hasAdminPermission(permission) {
+      return isSuperAdmin() || (
+        isSignedIn() &&
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.permissions[permission] == true
+      );
+    }
+
+    function canViewUserDirectory() {
+      return isSuperAdmin() ||
+        hasAdminPermission('viewFullUserInfo') ||
+        hasAdminPermission('giveSlots') ||
+        hasAdminPermission('banUsers') ||
+        hasAdminPermission('addAdmins');
     }
 
     // 3. UserProfile Entity Validator
@@ -90,8 +113,8 @@ service cloud.firestore {
 
     // 5. Users Collection: User directory
     match /users/{userId} {
-      allow list: if isAdmin();
-      allow get: if (isOwner(userId) || isAdmin()) && isValidId(userId);
+      allow list: if canViewUserDirectory();
+      allow get: if (isOwner(userId) || canViewUserDirectory()) && isValidId(userId);
       allow create: if isOwner(userId) && isValidId(userId) &&
         isValidUserProfile(incoming()) &&
         incoming().createdAt == request.time &&
@@ -101,15 +124,26 @@ service cloud.firestore {
         incoming().userId == existing().userId &&
         incoming().createdAt == existing().createdAt &&
         incoming().updatedAt == request.time &&
+        (
+          isOwner(userId) ||
+          isSuperAdmin() ||
+          (hasAdminPermission('giveSlots') && incoming().diff(existing()).affectedKeys().hasOnly([
+            'plan', 'planDuration', 'extraSlots', 'maxCredentialSlots', 'paymentStatus',
+            'paymentRef', 'paymentCurrency', 'approvedAt', 'expiresAt', 'isExpired', 'updatedAt'
+          ])) ||
+          (hasAdminPermission('banUsers') && incoming().diff(existing()).affectedKeys().hasOnly([
+            'isBanned', 'bannedReason', 'bannedAt', 'bannedBy', 'updatedAt'
+          ]))
+        ) &&
         // Unbanning rule: if account is currently banned, only superadmin can unban it!
         (!('isBanned' in existing()) || existing().isBanned == false || incoming().isBanned == true || isSuperAdmin());
       allow delete: if false;
 
       // 6. Zero-Knowledge Private Vault: strictly isolated per user (blocked if banned)
       match /vault/{itemId} {
-        allow get, delete: if isOwner(userId) && isValidId(userId) && isValidId(itemId);
-        allow list: if isOwner(userId);
-        allow create, update: if isOwner(userId) && isValidId(userId) && isValidId(itemId) &&
+        allow get, delete: if isOwner(userId) && !isAccountBanned(userId) && isValidId(userId) && isValidId(itemId);
+        allow list: if isOwner(userId) && !isAccountBanned(userId);
+        allow create, update: if isOwner(userId) && !isAccountBanned(userId) && isValidId(userId) && isValidId(itemId) &&
           incoming().userId == request.auth.uid &&
           incoming().createdAt is timestamp &&
           incoming().updatedAt == request.time;
@@ -118,19 +152,27 @@ service cloud.firestore {
 
     // 7. Support Tickets Collection
     match /support_tickets/{ticketId} {
-      allow get: if (isSignedIn() && resource.data.userId == request.auth.uid) || isAdmin();
-      allow list: if isSignedIn();
+      allow get: if (isSignedIn() && resource.data.userId == request.auth.uid) ||
+        hasAdminPermission('answerComplaints') || hasAdminPermission('redirectSuggestions');
+      allow list: if (isSignedIn() && resource.data.userId == request.auth.uid) ||
+        hasAdminPermission('answerComplaints') || hasAdminPermission('redirectSuggestions');
       allow create: if isSignedIn() && isValidId(ticketId) &&
         isValidSupportTicket(incoming()) &&
         incoming().userId == request.auth.uid &&
         incoming().createdAt == request.time;
-      allow update, delete: if isAdmin() && isValidId(ticketId);
+      allow update: if isValidId(ticketId) && (
+        (hasAdminPermission('answerComplaints') && incoming().diff(existing()).affectedKeys().hasOnly(['status'])) ||
+        (hasAdminPermission('redirectSuggestions') && incoming().diff(existing()).affectedKeys().hasOnly([
+          'isRedirectedToOwner', 'redirectedBy', 'adminNotes', 'updatedAt'
+        ]))
+      );
+      allow delete: if isSuperAdmin() && isValidId(ticketId);
     }
 
     // 8. Administrators Collection
     match /admins/{adminId} {
       allow read: if isSignedIn();
-      allow write: if isAdmin();
+      allow create, update, delete: if hasAdminPermission('addAdmins');
     }
   }
 }

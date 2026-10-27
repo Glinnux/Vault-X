@@ -85,7 +85,7 @@ export const LanguageSelector: React.FC<LanguageSelectorProps> = ({
 
       {/* Dropdown Menu */}
       {isOpen && (
-        <div className="absolute right-0 mt-2 w-72 sm:w-80 rounded-2xl bg-slate-900/95 border border-slate-700/80 shadow-2xl backdrop-blur-2xl z-50 p-2 text-xs animate-in fade-in zoom-in-95 duration-150 tech-corners">
+        <div className="vault-dropdown-panel absolute right-0 mt-2 w-72 sm:w-80 rounded-2xl bg-slate-900/95 border border-slate-700/80 shadow-2xl backdrop-blur-2xl z-50 p-2 text-xs tech-corners">
           {/* Header */}
           <div className="px-3 py-2 border-b border-slate-800 flex items-center justify-between">
             <div className="flex items-center space-x-1.5 text-white font-bold text-xs">

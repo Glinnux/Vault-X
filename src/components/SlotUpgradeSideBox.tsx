@@ -118,7 +118,7 @@ export const SlotUpgradeSideBox: React.FC<SlotUpgradeSideBoxProps> = ({
             <div className="flex items-start gap-1.5 text-rose-300 bg-rose-950/40 border border-rose-900/60 p-2 rounded-lg">
               <AlertCircle className="w-3.5 h-3.5 text-rose-400 flex-shrink-0 mt-0.5" />
               <span>
-                <strong>Limit Reached:</strong> All {maxSlots} credential slots are filled. Upgrade to allot 20 more slots.
+                <strong>Limit Reached:</strong> All {maxSlots} vault item slots are filled. Upgrade to allot more slots.
               </span>
             </div>
           ) : (
@@ -171,7 +171,7 @@ export const SlotUpgradeSideBox: React.FC<SlotUpgradeSideBoxProps> = ({
           </h4>
 
           <p className="text-xs text-slate-300 mb-3.5 leading-relaxed">
-            Free users have 10 slots. Upgrade now to allot 20 extra credential slots for your personal and work logins.
+            Free users have 10 slots. Each credential or document uses one slot. Upgrade to add more vault item slots.
           </p>
 
           {/* Pricing Box */}
@@ -233,7 +233,7 @@ export const SlotUpgradeSideBox: React.FC<SlotUpgradeSideBoxProps> = ({
             +20 Extra Slots Allotted
           </h4>
           <p className="text-xs text-slate-300 mb-4 leading-relaxed">
-            Your vault capacity has been extended to 30 credential slots. Enjoy enhanced zero-knowledge personal storage.
+            Your vault capacity has been extended. Credentials and documents each use one vault item slot.
           </p>
 
           <div className="flex flex-col gap-2">

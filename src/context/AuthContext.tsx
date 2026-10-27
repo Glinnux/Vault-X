@@ -9,13 +9,15 @@ import {
   sendPasswordResetEmail,
   signOut as fbSignOut,
 } from 'firebase/auth';
-import { doc, getDoc, setDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, getDoc, onSnapshot, setDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db, googleProvider } from '../lib/firebase';
 import { isUserAdmin } from '../services/adminService';
 
 interface AuthContextType {
   user: User | null;
   loading: boolean;
+  isBanned: boolean;
+  bannedReason: string;
   authError: string | null;
   isAuthModalOpen: boolean;
   openAuthModal: () => void;
@@ -33,6 +35,8 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isBanned, setIsBanned] = useState(false);
+  const [bannedReason, setBannedReason] = useState('');
   const [authError, setAuthError] = useState<string | null>(null);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const isSigningInRef = useRef(false);
@@ -44,6 +48,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser);
+      setLoading(true);
 
       if (currentUser) {
         setIsAuthModalOpen(false);
@@ -52,6 +57,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const isOwnerAdmin = isUserAdmin(currentUser.email, currentUser.uid);
           const userDocRef = doc(db, 'users', currentUser.uid);
           const docSnap = await getDoc(userDocRef);
+          setIsBanned(Boolean(docSnap.data()?.isBanned));
+          setBannedReason(docSnap.data()?.bannedReason || '');
 
           if (isOwnerAdmin) {
             // Seed localStorage immediately with unrestricted admin plan
@@ -119,13 +126,33 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           }
         } catch (err) {
           console.warn('Could not sync user profile record:', err);
+          setIsBanned(false);
+          setBannedReason('');
         }
+      } else {
+        setIsBanned(false);
+        setBannedReason('');
       }
       setLoading(false);
     });
 
     return () => unsubscribe();
   }, []);
+
+  useEffect(() => {
+    if (!user) return;
+
+    return onSnapshot(
+      doc(db, 'users', user.uid),
+      (snapshot) => {
+        setIsBanned(Boolean(snapshot.data()?.isBanned));
+        setBannedReason(snapshot.data()?.bannedReason || '');
+      },
+      (error) => {
+        console.error('Failed to monitor account access status:', error);
+      }
+    );
+  }, [user]);
 
   const signInWithGoogle = async () => {
     if (isSigningInRef.current) return;
@@ -223,6 +250,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       setAuthError(null);
       setUser(null);
+      setIsBanned(false);
+      setBannedReason('');
       await fbSignOut(auth);
     } catch (err: any) {
       console.error('Sign-out failed:', err);
@@ -245,6 +274,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       value={{
         user,
         loading,
+        isBanned,
+        bannedReason,
         authError,
         isAuthModalOpen,
         openAuthModal,

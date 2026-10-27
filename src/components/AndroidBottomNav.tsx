@@ -34,7 +34,7 @@ export const AndroidBottomNav: React.FC<AndroidBottomNavProps> = ({
   return (
     <nav
       aria-label="Mobile Navigation"
-      className="site-chrome md:hidden fixed bottom-0 left-0 right-0 z-40 bg-[#040e08]/95 backdrop-blur-2xl border-t border-emerald-950 shadow-2xl pb-safe pt-1.5"
+      className="android-bottom-nav site-chrome fixed bottom-0 left-0 right-0 z-40 bg-[#040e08]/95 backdrop-blur-2xl border-t border-emerald-950 shadow-2xl pt-1.5"
     >
       <div className="flex items-center justify-around px-2 max-w-lg mx-auto h-14">
         {/* All Items */}

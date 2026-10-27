@@ -7,6 +7,7 @@ import {
   updateDoc,
   deleteDoc,
   onSnapshot,
+  writeBatch,
   query,
   where,
   orderBy,
@@ -26,6 +27,17 @@ export const SUPER_ADMIN_EMAILS = [
   'oluwolefaith92@gmail.com',
   'faitholuwole6@gmail.com',
 ];
+
+const NO_ADMIN_PERMISSIONS: AdminPermissions = {
+  viewFullUserInfo: false,
+  giveSlots: false,
+  answerComplaints: false,
+  redirectSuggestions: false,
+  viewTransactions: false,
+  banUsers: false,
+  addAdmins: false,
+  receiveTransactionNotices: false,
+};
 
 // In-memory cache of appointed admin emails & UIDs with their permissions
 const dynamicAdminEmails = new Set<string>();
@@ -107,7 +119,7 @@ export function getAdminPermissions(
     }
   } catch (_e) {}
 
-  return DEFAULT_APPOINTED_ADMIN_PERMISSIONS;
+  return NO_ADMIN_PERMISSIONS;
 }
 
 /**
@@ -385,25 +397,16 @@ export async function removeAdminRole(
     throw new Error('Primary Owner & Super-Administrator role cannot be removed.');
   }
 
-  // Remove from admins collection
-  try {
-    await deleteDoc(doc(db, 'admins', targetUserId));
-  } catch (err) {
-    console.warn('Error deleting admin document:', err);
-  }
-
-  // Reset user's role back to user
-  try {
-    await updateDoc(doc(db, 'users', targetUserId), {
-      role: 'user',
-      plan: 'free',
-      extraSlots: 0,
-      maxCredentialSlots: 10,
-      updatedAt: serverTimestamp(),
-    });
-  } catch (err) {
-    console.warn('Error updating user document:', err);
-  }
+  const batch = writeBatch(db);
+  batch.delete(doc(db, 'admins', targetUserId));
+  batch.update(doc(db, 'users', targetUserId), {
+    role: 'user',
+    plan: 'free',
+    extraSlots: 0,
+    maxCredentialSlots: 10,
+    updatedAt: serverTimestamp(),
+  });
+  await batch.commit();
 
   dynamicAdminEmails.delete(targetEmail.toLowerCase());
   dynamicAdminUids.delete(targetUserId);
@@ -425,6 +428,7 @@ export async function banUserAccount(
     isBanned: true,
     bannedReason: cleanReason,
     bannedBy: bannedByEmail,
+    bannedAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
 }
@@ -445,6 +449,7 @@ export async function unbanUserAccount(
     isBanned: false,
     bannedReason: '',
     bannedBy: '',
+    bannedAt: null,
     updatedAt: serverTimestamp(),
   });
 }
