@@ -21,7 +21,7 @@ import {
   Cpu,
 } from 'lucide-react';
 import { VaultItem } from '../types/vault';
-import { formatBytes } from '../services/imageStorageService';
+import { formatBytes, resolveVaultFileUrl } from '../services/imageStorageService';
 
 interface VaultCardProps {
   item: VaultItem;
@@ -53,10 +53,24 @@ export const VaultCard: React.FC<VaultCardProps> = ({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [showLightbox, setShowLightbox] = useState(false);
+  const [resolvedImageUrl, setResolvedImageUrl] = useState<string | undefined>(item.imageUrl);
 
   // Futuristic Decrypt scramble state
   const [isDecrypting, setIsDecrypting] = useState(false);
   const [scramblePreview, setScramblePreview] = useState('');
+
+  useEffect(() => {
+    let active = true;
+    setResolvedImageUrl(item.imageUrl);
+    if (item.imageUrl?.startsWith('supabase://')) {
+      resolveVaultFileUrl(item.imageUrl).then((url) => {
+        if (active) setResolvedImageUrl(url);
+      }).catch(() => {
+        if (active) setResolvedImageUrl(undefined);
+      });
+    }
+    return () => { active = false; };
+  }, [item.imageUrl]);
 
   // Auto-hide password after 15 seconds for privacy
   useEffect(() => {
@@ -357,8 +371,8 @@ export const VaultCard: React.FC<VaultCardProps> = ({
         </div>
       )}
 
-      {/* Image Attachment Display (Max 200MB) */}
-      {item.imageUrl && (
+      {/* Image Attachment Display (Max 50MB) */}
+      {resolvedImageUrl && (
         <div className="mt-3 pt-2.5 border-t border-slate-800/60">
           <div className="flex items-center justify-between text-[11px] font-medium text-slate-400 mb-1.5">
             <span className="flex items-center gap-1">
@@ -378,7 +392,7 @@ export const VaultCard: React.FC<VaultCardProps> = ({
           >
             <div className="w-14 h-14 rounded-lg overflow-hidden bg-slate-900 border border-slate-800 flex-shrink-0 relative">
               <img
-                src={item.imageUrl}
+                src={resolvedImageUrl}
                 alt={item.imageName || 'Attached document'}
                 className="w-full h-full object-cover group-hover/img:scale-105 transition-transform duration-300"
               />
@@ -402,7 +416,7 @@ export const VaultCard: React.FC<VaultCardProps> = ({
       )}
 
       {/* Lightbox Full Resolution Modal */}
-      {showLightbox && item.imageUrl && (
+      {showLightbox && resolvedImageUrl && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/90 backdrop-blur-md animate-in fade-in"
           onClick={(e) => {
@@ -428,7 +442,7 @@ export const VaultCard: React.FC<VaultCardProps> = ({
 
               <div className="flex items-center space-x-2">
                 <a
-                  href={item.imageUrl}
+                  href={resolvedImageUrl}
                   download={item.imageName || 'vault-image'}
                   target="_blank"
                   rel="noreferrer"
@@ -452,7 +466,7 @@ export const VaultCard: React.FC<VaultCardProps> = ({
             {/* Image display */}
             <div className="flex-1 overflow-auto p-4 flex items-center justify-center bg-black/60">
               <img
-                src={item.imageUrl}
+                src={resolvedImageUrl}
                 alt={item.imageName || 'Full resolution view'}
                 className="max-w-full max-h-[75vh] object-contain rounded-lg shadow-lg"
               />

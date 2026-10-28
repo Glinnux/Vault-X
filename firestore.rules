@@ -124,7 +124,7 @@ service cloud.firestore {
         (!('notes' in data.keys()) || (data.notes is string && data.notes.size() <= 5000)) &&
         (!('imageUrl' in data.keys()) || (data.imageUrl is string && data.imageUrl.size() <= 2048)) &&
         (!('imageName' in data.keys()) || (data.imageName is string && data.imageName.size() <= 255)) &&
-        (!('imageSize' in data.keys()) || (data.imageSize is number && data.imageSize >= 0 && data.imageSize <= 209715200)) &&
+        (!('imageSize' in data.keys()) || (data.imageSize is number && data.imageSize >= 0 && data.imageSize <= 52428800)) &&
         (!('imageType' in data.keys()) || (data.imageType is string && data.imageType.size() <= 100));
     }
 

@@ -10,6 +10,7 @@ import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'crypto';
 import { applicationDefault, cert, getApps, initializeApp } from 'firebase-admin/app';
 import { getAuth as getAdminAuth } from 'firebase-admin/auth';
 import { getFirestore as getAdminFirestore, Timestamp } from 'firebase-admin/firestore';
+import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 
 dotenv.config();
 
@@ -17,8 +18,17 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
+app.disable('x-powered-by');
 const PORT = Number(process.env.PORT) || 3000;
 const SUPPORT_EMAIL = 'oluwolefaith92@gmail.com';
+const SUPABASE_URL = process.env.SUPABASE_URL || '';
+const SUPABASE_SECRET_KEY = process.env.SUPABASE_SECRET_KEY || '';
+const SUPABASE_BUCKET = process.env.SUPABASE_BUCKET || 'vault-files';
+const supabaseAdmin = SUPABASE_URL && SUPABASE_SECRET_KEY
+  ? createSupabaseClient(SUPABASE_URL, SUPABASE_SECRET_KEY, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    })
+  : null;
 
 app.use(express.json({ limit: '12mb' }));
 
@@ -48,6 +58,13 @@ app.use((_req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=()');
+  if (_req.path.startsWith('/api/')) {
+    res.setHeader('Cache-Control', 'no-store');
+  }
+  if (process.env.NODE_ENV === 'production') {
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  }
   next();
 });
 
@@ -178,6 +195,19 @@ async function notifyRecoveryAdmins(subject: string, body: string, fields: Recor
 }
 
 async function loadAdminPermissions(uid: string, idToken: string): Promise<Record<string, boolean>> {
+  if (adminDb) {
+    try {
+      const snapshot = await adminDb.collection('admins').doc(uid).get();
+      const permissions = snapshot.data()?.permissions;
+      if (permissions && typeof permissions === 'object') {
+        return Object.fromEntries(
+          Object.entries(permissions).map(([key, value]) => [key, value === true])
+        );
+      }
+    } catch (error) {
+      console.error('[Auth] Could not load admin permissions with Admin SDK:', error);
+    }
+  }
   if (!firebaseServerConfig.projectId) return {};
   const url = `https://firestore.googleapis.com/v1/projects/${firebaseServerConfig.projectId}/databases/${firebaseServerConfig.databaseId}/documents/admins/${uid}`;
   const response = await fetch(url, { headers: { Authorization: `Bearer ${idToken}` } });
@@ -195,6 +225,21 @@ async function verifyApiUser(req: Request): Promise<VerifiedApiUser | null> {
   if (!idToken || !firebaseServerConfig.apiKey) return null;
 
   try {
+    // Prefer Firebase Admin verification on the trusted server. The REST
+    // lookup below remains only as a local-development fallback when the
+    // server is intentionally running without Admin SDK credentials.
+    if (adminAuth) {
+      const decoded = await adminAuth.verifyIdToken(idToken, true);
+      const account = await adminAuth.getUser(decoded.uid);
+      if (account.disabled) return null;
+      return {
+        uid: account.uid,
+        email: normalizeEmail(account.email || decoded.email || ''),
+        idToken,
+        permissions: await loadAdminPermissions(account.uid, idToken),
+      };
+    }
+
     const response = await fetch(
       `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${encodeURIComponent(firebaseServerConfig.apiKey)}`,
       {
@@ -236,6 +281,26 @@ async function requireApiUser(req: Request, res: Response, permission?: string |
   return user;
 }
 
+function safeVaultFileName(value: unknown): string {
+  return String(value || 'file').replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 160);
+}
+
+function isAllowedVaultMimeType(value: unknown): boolean {
+  return new Set([
+    'image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/avif',
+    'application/pdf', 'text/plain', 'text/csv', 'application/json',
+    'application/msword', 'application/rtf',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  ]).has(String(value || '').toLowerCase());
+}
+
+function isUserVaultPath(pathValue: unknown, uid: string): pathValue is string {
+  return typeof pathValue === 'string' &&
+    pathValue.startsWith(`users/${uid}/vault/`) &&
+    pathValue.length <= 500 &&
+    !pathValue.includes('..');
+}
+
 async function requireAdminChatUser(req: Request, res: Response): Promise<(VerifiedApiUser & { isSuperAdmin: boolean }) | null> {
   const user = await requireApiUser(req, res);
   if (!user || !adminDb) {
@@ -254,6 +319,51 @@ async function requireAdminChatUser(req: Request, res: Response): Promise<(Verif
 function firestoreMillis(value: any): number | null {
   return value?.toMillis?.() || (typeof value === 'number' ? value : null);
 }
+
+// Supabase Storage is private. Firebase-authenticated users receive only
+// short-lived signed upload/download URLs from this trusted server.
+app.post('/api/vault/files/sign-upload', rateLimit(20, 10 * 60_000), async (req: Request, res: Response) => {
+  const user = await requireApiUser(req, res);
+  if (!user) return;
+  if (!supabaseAdmin) {
+    res.status(503).json({ error: 'Supabase Storage is not configured on the server.' });
+    return;
+  }
+
+  const itemId = String(req.body?.itemId || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 100);
+  const fileName = safeVaultFileName(req.body?.fileName);
+  const contentType = String(req.body?.contentType || '').toLowerCase();
+  const size = Number(req.body?.size);
+  if (!itemId || !isAllowedVaultMimeType(contentType) || !Number.isFinite(size) || size <= 0 || size > 50 * 1024 * 1024) {
+    res.status(400).json({ error: 'File details are invalid or exceed the 50MB limit.' });
+    return;
+  }
+
+  const filePath = `users/${user.uid}/vault/${itemId}_${Date.now()}_${fileName}`;
+  const { data, error } = await supabaseAdmin.storage.from(SUPABASE_BUCKET).createSignedUploadUrl(filePath);
+  if (error || !data?.token) {
+    console.error('[Supabase Storage] Could not create upload URL:', error);
+    res.status(502).json({ error: 'Could not prepare the secure file upload.' });
+    return;
+  }
+  res.json({ path: filePath, token: data.token, bucket: SUPABASE_BUCKET });
+});
+
+app.post('/api/vault/files/sign-download', rateLimit(60, 10 * 60_000), async (req: Request, res: Response) => {
+  const user = await requireApiUser(req, res);
+  if (!user) return;
+  if (!supabaseAdmin || !isUserVaultPath(req.body?.path, user.uid)) {
+    res.status(400).json({ error: 'Invalid vault file path.' });
+    return;
+  }
+  const { data, error } = await supabaseAdmin.storage.from(SUPABASE_BUCKET).createSignedUrl(req.body.path, 60 * 60);
+  if (error || !data?.signedUrl) {
+    console.error('[Supabase Storage] Could not create download URL:', error);
+    res.status(404).json({ error: 'Could not access the vault file.' });
+    return;
+  }
+  res.json({ url: data.signedUrl });
+});
 
 app.get('/api/admin/chats', async (req: Request, res: Response) => {
   const user = await requireAdminChatUser(req, res);
@@ -403,6 +513,59 @@ app.post('/api/admin/chats/:chatId/leave', async (req: Request, res: Response) =
   } catch (error: any) {
     const message = error?.message || 'Could not leave the group chat.';
     res.status(message.includes('Only group') || message.includes('not a member') ? 400 : 500).json({ error: message });
+  }
+});
+
+app.post('/api/admin/chats/:chatId/participants', async (req: Request, res: Response) => {
+  const user = await requireAdminChatUser(req, res);
+  if (!user || !adminDb) return;
+  if (!user.isSuperAdmin) {
+    res.status(403).json({ error: 'Only the superadmin can add people to a group.' });
+    return;
+  }
+  try {
+    const requestedIds: string[] = Array.isArray(req.body?.participantIds)
+      ? [...new Set<string>(req.body.participantIds.map((value: unknown) => String(value).trim()).filter(Boolean) as string[])]
+      : [];
+    if (requestedIds.length === 0 || requestedIds.length > 100) {
+      res.status(400).json({ error: 'Choose at least one administrator to add.' });
+      return;
+    }
+    const chatRef = adminDb.collection('admin_chats').doc(req.params.chatId);
+    const chatSnapshot = await chatRef.get();
+    const chat = chatSnapshot.data();
+    if (!chatSnapshot.exists || !chat || chat.type !== 'group') {
+      res.status(400).json({ error: 'People can only be added to group chats.' });
+      return;
+    }
+    const currentIds = Array.isArray(chat.participantIds) ? chat.participantIds : [];
+    const currentEmails = Array.isArray(chat.participantEmails) ? chat.participantEmails : [];
+    const additions: { uid: string; email: string }[] = [];
+    for (const uid of requestedIds) {
+      if (currentIds.includes(uid)) continue;
+      const appointedAdmin = await adminDb.collection('admins').doc(uid).get();
+      let account = await adminAuth?.getUser(uid).catch(() => null);
+      const isConfiguredSuperadmin = Boolean(account?.email && SUPER_ADMIN_EMAILS.has(normalizeEmail(account.email)));
+      if (!appointedAdmin.exists && !isConfiguredSuperadmin) continue;
+      if (!account) account = await adminAuth?.getUser(uid).catch(() => null);
+      const email = normalizeEmail(String(account?.email || appointedAdmin.data()?.email || ''));
+      if (email) additions.push({ uid, email });
+    }
+    if (additions.length === 0) {
+      res.status(400).json({ error: 'No new administrator accounts were selected.' });
+      return;
+    }
+    await chatRef.update({
+      participantIds: [...currentIds, ...additions.map((addition) => addition.uid)],
+      participantEmails: [...currentEmails, ...additions.map((addition) => addition.email)],
+      updatedAt: Timestamp.now(),
+    });
+    const updatedChat = await chatRef.get();
+    const updated = updatedChat.data() || {};
+    res.json({ chat: { id: updatedChat.id, ...updated, createdAt: firestoreMillis(updated.createdAt), updatedAt: firestoreMillis(updated.updatedAt) } });
+  } catch (error) {
+    console.error('[Admin Chat] Could not add group participants:', error);
+    res.status(500).json({ error: 'Could not add people to the group.' });
   }
 });
 
@@ -1175,6 +1338,25 @@ app.post('/api/payment-submission', rateLimit(5, 10 * 60_000), async (req: Reque
       res.status(400).json({ error: 'Receipt must be a valid file of 10MB or less.' });
       return;
     }
+    const receiptType = String(receipt.type || '').toLowerCase();
+    const allowedReceiptTypes = new Set([
+      'image/jpeg',
+      'image/png',
+      'image/webp',
+      'application/pdf',
+    ]);
+    if (!allowedReceiptTypes.has(receiptType)) {
+      res.status(400).json({ error: 'Receipt must be a JPEG, PNG, WebP image, or PDF.' });
+      return;
+    }
+    if (
+      typeof receipt.data !== 'string' ||
+      receipt.data.length % 4 !== 0 ||
+      !/^[A-Za-z0-9+/]*={0,2}$/.test(receipt.data)
+    ) {
+      res.status(400).json({ error: 'Receipt file encoding is invalid.' });
+      return;
+    }
     const receiptBuffer = Buffer.from(receipt.data, 'base64');
     if (!receiptBuffer.length || receiptBuffer.length > 10 * 1024 * 1024) {
       res.status(400).json({ error: 'Receipt file could not be validated.' });
@@ -1282,7 +1464,7 @@ Quantum-Resistant Isolated Storage`;
         Notice_To_Customer: 'Payment would be confirmed within 2 working days',
       },
       textContent: adminEmailBody,
-      attachments: [{ filename: safeReceiptName, content: receiptBuffer, contentType: String(receipt.type || 'application/octet-stream') }],
+      attachments: [{ filename: safeReceiptName, content: receiptBuffer, contentType: receiptType }],
     });
 
     // 2. Also try sending confirmation to the user if userEmail is provided and SMTP is set up
@@ -1298,7 +1480,7 @@ Quantum-Resistant Isolated Storage`;
           Notice: 'Your payment would be confirmed within 2 working days',
         },
         textContent: customerEmailContent,
-          attachments: [{ filename: safeReceiptName, content: receiptBuffer, contentType: String(receipt.type || 'application/octet-stream') }],
+          attachments: [{ filename: safeReceiptName, content: receiptBuffer, contentType: receiptType }],
       });
     }
 
@@ -1321,7 +1503,7 @@ Quantum-Resistant Isolated Storage`;
       emailDeliveryStatus: adminDelivery.message,
       emailDeliveryMethod: adminDelivery.method,
       receiptName: safeReceiptName,
-      receiptType: String(receipt.type || 'application/octet-stream'),
+      receiptType,
       receiptSize: receiptBuffer.length,
     };
     savePaymentSubmission(paymentRecord);

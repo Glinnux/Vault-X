@@ -113,7 +113,7 @@ export const VaultHeader: React.FC<VaultHeaderProps> = ({
                 <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
               </span>
             </div>
-            <div>
+            <div className="vault-header-brand-details min-w-0">
               <div className="flex items-center space-x-2">
                 <span className="font-extrabold text-lg sm:text-xl tracking-tight text-white group-hover:text-emerald-300 transition-colors font-mono">
                   VAULT<span className="text-emerald-400">-X</span>
@@ -130,9 +130,9 @@ export const VaultHeader: React.FC<VaultHeaderProps> = ({
           </div>
 
           {/* Right actions: Language Changer, Admin Console & Auth */}
-          <div className="flex items-center space-x-2 sm:space-x-3">
+          <div className="vault-header-actions flex min-w-0 max-w-full shrink items-center space-x-2 sm:space-x-3">
             {/* Language Selector Dropdown */}
-            <LanguageSelector />
+            <LanguageSelector className="vault-header-language shrink-0" />
 
             {isInstallable && onInstallApp && (
               <button
@@ -147,7 +147,7 @@ export const VaultHeader: React.FC<VaultHeaderProps> = ({
             {isAdmin && (
               <button
                 onClick={() => onSelectView(isAdminArea ? 'all' : 'admin')}
-                className={`flex items-center space-x-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border transition-all cursor-pointer relative ${
+                className={`vault-header-admin-button flex shrink-0 items-center space-x-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border transition-all cursor-pointer relative ${
                   isAdminArea
                     ? 'bg-purple-600 border-purple-400 text-white shadow-md shadow-purple-600/30'
                     : 'bg-purple-950/70 border-purple-800 text-purple-200 hover:bg-purple-900/80 hover:border-purple-600'
@@ -155,9 +155,9 @@ export const VaultHeader: React.FC<VaultHeaderProps> = ({
                 title="View All Registered Users & Payments (Admin Console)"
               >
                 <Users className="w-3.5 h-3.5 text-purple-300" />
-                <span>{isAdminArea ? 'Exit Admin' : t('nav_admin', 'Admin Console')}</span>
+                <span className="vault-header-admin-label">{isAdminArea ? 'Exit Admin' : t('nav_admin', 'Admin Console')}</span>
                 {pendingPaymentsCount > 0 && (
-                  <span className="flex items-center gap-1 bg-amber-500 text-slate-950 font-bold text-[10px] px-1.5 py-0.2 rounded-full font-mono animate-pulse shadow-sm">
+                  <span className="vault-header-admin-alert hidden items-center gap-1 bg-amber-500 text-slate-950 font-bold text-[10px] px-1.5 py-0.2 rounded-full font-mono animate-pulse shadow-sm sm:flex">
                     {pendingPaymentsCount} NEW
                   </span>
                 )}
@@ -167,7 +167,7 @@ export const VaultHeader: React.FC<VaultHeaderProps> = ({
             {loading ? (
               <div className="w-8 h-8 rounded-full border-2 border-slate-700 border-t-cyan-500 animate-spin" />
             ) : user ? (
-              <div className="flex items-center space-x-3 pl-2 border-l border-slate-800">
+              <div className="vault-header-account flex min-w-0 shrink-0 items-center space-x-3 pl-2 border-l border-slate-800">
                 <div className="flex items-center space-x-2">
                   {user.photoURL ? (
                     <img
@@ -191,7 +191,7 @@ export const VaultHeader: React.FC<VaultHeaderProps> = ({
                 </div>
 
                 {/* User UID verification chip */}
-                <div className="hidden md:flex items-center space-x-1.5 bg-slate-950/80 border border-slate-800 px-2 py-1 rounded-lg text-[10px] font-mono text-slate-400">
+                <div className="vault-header-uid-chip hidden md:flex items-center space-x-1.5 bg-slate-950/80 border border-slate-800 px-2 py-1 rounded-lg text-[10px] font-mono text-slate-400">
                   <span className="text-slate-500">UID:</span>
                   <span className="text-cyan-300 font-semibold truncate max-w-[80px]" title={user.uid}>
                     {user.uid.slice(0, 8)}...

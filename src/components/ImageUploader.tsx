@@ -72,7 +72,7 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
         <label className="block text-xs font-medium text-slate-300 flex items-center gap-1.5">
           <ImageIcon className="w-3.5 h-3.5 text-indigo-400" />
           <span>Image Attachment</span>
-          <span className="text-[10px] text-slate-500 font-normal">(Max 200MB)</span>
+          <span className="text-[10px] text-slate-500 font-normal">(Max 50MB)</span>
         </label>
         {selectedFileSize && (
           <span className="text-[11px] text-slate-400 font-mono">
@@ -159,7 +159,7 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
               Click or drag document / image here
             </p>
             <p className="text-[11px] text-slate-500 mt-0.5">
-              PDF, Documents, PNG, JPG, WebP up to <strong className="text-slate-400">200MB</strong>
+              PDF, Documents, PNG, JPG, WebP up to <strong className="text-slate-400">50MB</strong>
             </p>
           </div>
         )}

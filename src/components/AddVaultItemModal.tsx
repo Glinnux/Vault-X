@@ -72,7 +72,7 @@ export const AddVaultItemModal: React.FC<AddVaultItemModalProps> = ({
   const [notes, setNotes] = useState('');
   const [favorite, setFavorite] = useState(false);
 
-  // Image attachment state (max 200MB)
+  // Image attachment state (max 50MB)
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [uploadProgress, setUploadProgress] = useState<number>(0);
 
@@ -414,7 +414,7 @@ export const AddVaultItemModal: React.FC<AddVaultItemModalProps> = ({
             />
           </div>
 
-          {/* Image Attachment (Up to 200MB) */}
+          {/* Image Attachment (Up to 50MB) */}
           <div className="pt-1">
             <ImageUploader
               onFileSelect={(file) => setImageFile(file)}

@@ -280,7 +280,7 @@
         },
         "imageSize": {
           "type": "number",
-          "description": "Size of image in bytes, max 200MB (209715200 bytes)"
+          "description": "Size of image in bytes, max 50MB (52428800 bytes)"
         },
         "imageType": {
           "type": "string",

@@ -7,6 +7,12 @@ export default defineConfig(() => {
   return {
     base: process.env.GITHUB_PAGES === 'true' ? '/Vault-X/' : '/',
     plugins: [react(), tailwindcss()],
+    build: {
+      // Do not publish source maps containing the application source in
+      // production bundles. The browser still needs the compiled app, so
+      // this reduces disclosure rather than pretending to hide source code.
+      sourcemap: false,
+    },
     resolve: {
       alias: {
         '@': path.resolve(import.meta.dirname, '.'),

@@ -609,7 +609,7 @@ function VaultApp() {
                   Zero-Knowledge Personal Vault
                 </h3>
                 <p className="text-slate-400 text-xs sm:text-sm max-w-md mx-auto mb-8 leading-relaxed">
-                  Authenticate securely to unlock your dedicated cloud enclave. Protect Facebook & Google logins, personal documents up to 200MB, and encrypted keys with cryptographic isolation.
+                  Authenticate securely to unlock your dedicated cloud enclave. Protect Facebook & Google logins, personal documents up to 50MB, and encrypted keys with cryptographic isolation.
                 </p>
 
                 <div className="flex items-center justify-center">
@@ -633,7 +633,7 @@ function VaultApp() {
                   </div>
                   <div className="flex items-start gap-2">
                     <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
-                    <span className="text-[11px]">Confidential Images &le; 200MB</span>
+                    <span className="text-[11px]">Confidential Images &le; 50MB</span>
                   </div>
                 </div>
               </div>
@@ -737,7 +737,7 @@ function VaultApp() {
             {isAdmin && (
               <span className="text-emerald-300 font-medium">Administrator Authenticated</span>
             )}
-            <span>Max Upload: 200MB</span>
+            <span>Max Upload: 50MB</span>
           </div>
         </div>
       </footer>

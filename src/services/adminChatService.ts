@@ -74,3 +74,12 @@ export async function sendAdminChatMessage(chatId: string, text: string): Promis
 export async function leaveAdminGroup(chatId: string): Promise<void> {
   await request(`/api/admin/chats/${encodeURIComponent(chatId)}/leave`, { method: 'POST' });
 }
+
+export async function addPeopleToAdminGroup(chatId: string, participantIds: string[]): Promise<AdminChatRecord> {
+  const data = await request(`/api/admin/chats/${encodeURIComponent(chatId)}/participants`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ participantIds }),
+  });
+  return data.chat as AdminChatRecord;
+}

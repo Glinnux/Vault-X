@@ -4,7 +4,7 @@ import { X, KeyRound, FileText, Eye, EyeOff, Globe, Tag, Star, AlertCircle } fro
 import { VaultCategory, VaultItem } from '../types/vault';
 import { useAuth } from '../context/AuthContext';
 import { ImageUploader } from './ImageUploader';
-import { uploadVaultImage } from '../services/imageStorageService';
+import { resolveVaultFileUrl, uploadVaultImage } from '../services/imageStorageService';
 
 interface EditVaultItemModalProps {
   item: VaultItem | null;
@@ -31,6 +31,7 @@ export const EditVaultItemModal: React.FC<EditVaultItemModalProps> = ({
 
   // Image states
   const [imageUrl, setImageUrl] = useState<string | undefined>(undefined);
+  const [previewImageUrl, setPreviewImageUrl] = useState<string | undefined>(undefined);
   const [imageName, setImageName] = useState<string | undefined>(undefined);
   const [imageSize, setImageSize] = useState<number | undefined>(undefined);
   const [imageType, setImageType] = useState<string | undefined>(undefined);
@@ -51,6 +52,10 @@ export const EditVaultItemModal: React.FC<EditVaultItemModalProps> = ({
       setCategory(item.category);
       setNotes(item.notes || '');
       setImageUrl(item.imageUrl);
+      setPreviewImageUrl(item.imageUrl);
+      if (item.imageUrl?.startsWith('supabase://')) {
+        resolveVaultFileUrl(item.imageUrl).then((url) => setPreviewImageUrl(url)).catch(() => setPreviewImageUrl(undefined));
+      }
       setImageName(item.imageName);
       setImageSize(item.imageSize);
       setImageType(item.imageType);
@@ -81,6 +86,7 @@ export const EditVaultItemModal: React.FC<EditVaultItemModalProps> = ({
       if (imageFile && user) {
         const uploaded = await uploadVaultImage(user.uid, item.id, imageFile, (p) => setUploadProgress(p));
         finalImageUrl = uploaded.url;
+        setPreviewImageUrl(uploaded.url);
         finalImageName = uploaded.name;
         finalImageSize = uploaded.size;
         finalImageType = uploaded.type;
@@ -267,10 +273,10 @@ export const EditVaultItemModal: React.FC<EditVaultItemModalProps> = ({
             />
           </div>
 
-          {/* Image Attachment (Up to 200MB) */}
+          {/* Image Attachment (Up to 50MB) */}
           <div className="pt-1">
             <ImageUploader
-              currentImageUrl={imageUrl}
+              currentImageUrl={previewImageUrl}
               currentImageName={imageName}
               uploadProgress={uploadProgress}
               onFileSelect={(f) => {

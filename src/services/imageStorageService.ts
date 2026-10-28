@@ -1,15 +1,10 @@
-import {
-  ref,
-  uploadBytesResumable,
-  getDownloadURL,
-  deleteObject,
-} from 'firebase/storage';
-import { storage } from '../lib/firebase';
+import { supabase } from '../lib/supabase';
+import { auth } from '../lib/firebase';
 
-export const MAX_IMAGE_SIZE_BYTES = 200 * 1024 * 1024; // 200 MB
+export const MAX_IMAGE_SIZE_BYTES = 50 * 1024 * 1024; // 50 MB
 
 /**
- * Validates that the uploaded file is a valid image, PDF, or personal document and strictly <= 200MB.
+ * Validates that the uploaded file is a valid image, PDF, or personal document and strictly <= 50MB.
  */
 export function validateImageFile(file: File): { valid: boolean; error?: string } {
   const allowedDocExt = /\.(jpe?g|png|webp|gif|svg|avif|bmp|ico|pdf|txt|csv|json|doc|docx|odt|rtf)$/i;
@@ -26,12 +21,12 @@ export function validateImageFile(file: File): { valid: boolean; error?: string 
     };
   }
 
-  // Strict 200MB check
+  // Strict 50MB check
   if (file.size > MAX_IMAGE_SIZE_BYTES) {
     const sizeMB = (file.size / (1024 * 1024)).toFixed(1);
     return {
       valid: false,
-      error: `File size is ${sizeMB}MB, which exceeds the maximum limit of 200MB. Please choose a file under 200MB.`,
+      error: `File size is ${sizeMB}MB, which exceeds the maximum limit of 50MB. Please choose a file under 50MB.`,
     };
   }
 
@@ -50,9 +45,8 @@ export function formatBytes(bytes?: number): string {
 }
 
 /**
- * Uploads an image up to 200MB to Firebase Storage with progress tracking.
- * It fails closed if Firebase Storage is unavailable instead of copying the
- * sensitive file into unencrypted browser storage.
+ * Uploads a vault file to private Supabase Storage using a server-issued
+ * signed upload URL. The Supabase secret key never reaches the browser.
  */
 export async function uploadVaultImage(
   userId: string,
@@ -65,45 +59,55 @@ export async function uploadVaultImage(
     throw new Error(validation.error);
   }
 
-  const safeFileName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-  const storagePath = `users/${userId}/vault/${itemId}_${Date.now()}_${safeFileName}`;
-  const imageRef = ref(storage, storagePath);
+  if (!supabase) throw new Error('Supabase Storage is not configured in the browser.');
+  const account = auth.currentUser;
+  if (!account || account.uid !== userId) throw new Error('Please sign in again before uploading.');
 
   try {
-    const uploadTask = uploadBytesResumable(imageRef, file);
-
-    const downloadUrl = await new Promise<string>((resolve, reject) => {
-      uploadTask.on(
-        'state_changed',
-        (snapshot) => {
-          if (snapshot.totalBytes > 0 && onProgress) {
-            const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
-            onProgress(Math.round(progress));
-          }
-        },
-        (error) => {
-          console.warn('Firebase Storage upload encountered an issue, using secure vault storage fallback:', error);
-          reject(error);
-        },
-        async () => {
-          try {
-            const url = await getDownloadURL(uploadTask.snapshot.ref);
-            resolve(url);
-          } catch (err) {
-            reject(err);
-          }
-        }
-      );
+    const token = await account.getIdToken();
+    const response = await fetch('/api/vault/files/sign-upload', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ itemId, fileName: file.name, contentType: file.type, size: file.size }),
     });
+    const details = await response.json().catch(() => ({}));
+    if (!response.ok || !details.path || !details.token) {
+      throw new Error(details.error || 'Could not prepare the secure upload.');
+    }
+
+    const { error } = await supabase.storage.from(details.bucket).uploadToSignedUrl(details.path, details.token, file);
+    if (error) throw error;
+    onProgress?.(100);
 
     return {
-      url: downloadUrl,
+      // Store the private path, not an expiring public URL.
+      url: `supabase://${details.bucket}/${details.path}`,
       name: file.name,
       size: file.size,
       type: file.type || 'image/jpeg',
     };
-  } catch (storageError) {
-    console.error('Secure Firebase Storage upload failed:', storageError);
-    throw new Error('Secure file upload failed. Please try again when Firebase Storage is available.');
+  } catch (storageError: any) {
+    console.error('Secure Supabase Storage upload failed:', storageError);
+    throw new Error(storageError?.message || 'Secure file upload failed. Please try again.');
   }
+}
+
+export async function resolveVaultFileUrl(storedUrl?: string): Promise<string | undefined> {
+  if (!storedUrl) return undefined;
+  if (!storedUrl.startsWith('supabase://')) return storedUrl;
+  const separator = storedUrl.indexOf('/', 'supabase://'.length);
+  if (separator < 0) return undefined;
+  const bucket = storedUrl.slice('supabase://'.length, separator);
+  const path = storedUrl.slice(separator + 1);
+  const account = auth.currentUser;
+  if (!account) return undefined;
+  const token = await account.getIdToken();
+  const response = await fetch('/api/vault/files/sign-download', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ bucket, path }),
+  });
+  if (!response.ok) return undefined;
+  const data = await response.json();
+  return data.url;
 }

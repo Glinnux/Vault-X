@@ -15,8 +15,10 @@ import {
   ExternalLink,
   ChevronDown,
   ChevronUp,
+  FileText,
 } from 'lucide-react';
 import { VaultXLogo } from './VaultXLogo';
+import { TermsModal } from './TermsModal';
 import { useAuth } from '../context/AuthContext';
 
 export const AuthModal: React.FC = () => {
@@ -40,6 +42,20 @@ export const AuthModal: React.FC = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [localSuccessMsg, setLocalSuccessMsg] = useState<string | null>(null);
   const [showTroubleshooting, setShowTroubleshooting] = useState(false);
+  const [showTerms, setShowTerms] = useState(false);
+  const [termsRead, setTermsRead] = useState(false);
+  const [termsAccepted, setTermsAccepted] = useState(false);
+  const [termsError, setTermsError] = useState<string | null>(null);
+
+  const requiresTerms = mode === 'signin' || mode === 'signup';
+
+  const requireTermsAgreement = () => {
+    if (requiresTerms && !termsAccepted) {
+      setTermsError('Read the Terms and Conditions and tick the agreement box before continuing.');
+      return false;
+    }
+    return true;
+  };
 
   if (!isAuthModalOpen) return null;
 
@@ -47,8 +63,10 @@ export const AuthModal: React.FC = () => {
     e.preventDefault();
     clearAuthError();
     setLocalSuccessMsg(null);
+    setTermsError(null);
 
     if (!email.trim()) return;
+    if (!requireTermsAgreement()) return;
 
     setIsSubmitting(true);
     try {
@@ -80,6 +98,8 @@ export const AuthModal: React.FC = () => {
   const handleGoogleClick = async () => {
     clearAuthError();
     setLocalSuccessMsg(null);
+    setTermsError(null);
+    if (!requireTermsAgreement()) return;
     setIsSubmitting(true);
     try {
       await signInWithGoogle();
@@ -185,8 +205,44 @@ export const AuthModal: React.FC = () => {
           </div>
         )}
 
+        {requiresTerms && (
+          <div className="my-3 rounded-xl border-2 border-amber-400/70 bg-amber-950/35 p-3.5 shadow-lg shadow-amber-950/20">
+            <div className="flex items-start gap-2">
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" />
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-bold uppercase tracking-wide text-amber-200">Terms required before authentication</p>
+                <p className="mt-1 text-[11px] leading-relaxed text-amber-100/80">
+                  You must read the Terms and Conditions and confirm your agreement before Vault X will allow sign-in or account creation.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setShowTerms(true)}
+                  className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-amber-300/60 bg-amber-400/15 px-3 py-2 text-[11px] font-bold text-amber-200 hover:bg-amber-400/25"
+                >
+                  <FileText className="h-3.5 w-3.5" />
+                  {termsRead ? 'Review Terms and Conditions' : 'Read Terms and Conditions'}
+                </button>
+                <label className={`mt-3 flex items-start gap-2 text-xs ${termsRead ? 'cursor-pointer text-slate-200' : 'cursor-not-allowed text-slate-500'}`}>
+                  <input
+                    type="checkbox"
+                    checked={termsAccepted}
+                    disabled={!termsRead}
+                    onChange={(event) => {
+                      setTermsAccepted(event.target.checked);
+                      setTermsError(null);
+                    }}
+                    className="mt-0.5 h-4 w-4 accent-amber-500"
+                  />
+                  <span>I have read and agree to the Vault X Terms and Conditions.</span>
+                </label>
+                {termsError && <p className="mt-2 text-[11px] font-semibold text-rose-300">{termsError}</p>}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Social / OAuth Providers */}
-        {mode !== 'forgot' && (
+        {mode !== 'forgot' && mode !== 'recover-email' && (
           <div className="space-y-2.5 mt-3">
             {/* Google Sign In */}
             <button
@@ -443,6 +499,11 @@ export const AuthModal: React.FC = () => {
           )}
         </div>
       </div>
+      <TermsModal
+        isOpen={showTerms}
+        onClose={() => setShowTerms(false)}
+        onReadComplete={() => setTermsRead(true)}
+      />
     </div>
   );
 };

@@ -108,10 +108,10 @@ export const SecurityModal: React.FC<SecurityModalProps> = ({ isOpen, onClose })
               <div className="p-3 bg-slate-950/60 border border-slate-800 rounded-xl">
                 <div className="flex items-center space-x-2 text-amber-400 font-medium mb-1">
                   <Database className="w-4 h-4" />
-                  <span>200MB Asset Encryption</span>
+                  <span>50MB Asset Encryption</span>
                 </div>
                 <p className="text-slate-400 text-[11px] leading-relaxed">
-                  Confidential images and document attachments up to 200MB are chunked and encrypted in isolated user document storage.
+                  Confidential images and document attachments up to 50MB are chunked and encrypted in isolated user document storage.
                 </p>
               </div>
 
