@@ -39,6 +39,7 @@ import {
   AlertCircle,
   ChevronRight,
   KeyRound,
+  MessageCircle,
 } from 'lucide-react';
 import {
   UserAccount,
@@ -85,14 +86,15 @@ import {
 } from '../services/supportService';
 import { useAuth } from '../context/AuthContext';
 import { decideRecoveryRequest, fetchRecoveryRequests, RecoveryRequest } from '../services/recoveryService';
-
 interface AdminUsersPageProps {
   onBackToVault: () => void;
+  onOpenAdminChat: () => void;
   onToast: (msg: string, type?: 'success' | 'info' | 'error') => void;
 }
 
 export const AdminUsersPage: React.FC<AdminUsersPageProps> = ({
   onBackToVault,
+  onOpenAdminChat,
   onToast,
 }) => {
   const { user } = useAuth();
@@ -722,7 +724,16 @@ export const AdminUsersPage: React.FC<AdminUsersPageProps> = ({
           </div>
         </div>
 
-        <div className="flex items-center space-x-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={onOpenAdminChat}
+            className="inline-flex items-center gap-1.5 rounded-xl border border-cyan-500/40 bg-cyan-950/40 px-3 py-2 text-xs font-semibold text-cyan-200 transition-all hover:border-cyan-300 hover:bg-cyan-900/60"
+            title="Open Admin Chat"
+          >
+            <MessageCircle className="h-4 w-4" />
+            <span>Chat</span>
+          </button>
           {isSuperAdmin ? (
             <span className="px-3 py-1 rounded-full text-xs bg-purple-950/90 border border-purple-500/60 text-purple-200 flex items-center gap-1.5 font-bold shadow-sm">
               <ShieldCheck className="w-4 h-4 text-purple-400" />
@@ -859,7 +870,7 @@ export const AdminUsersPage: React.FC<AdminUsersPageProps> = ({
       )}
 
       {/* Main Distinct Tab Navigation Bar (Separating each feature into distinct tabs) */}
-      <div className="flex items-center gap-1.5 overflow-x-auto pb-1 border-b border-slate-800 text-xs">
+      <div className="admin-tab-scroll flex flex-nowrap items-center gap-1.5 overflow-x-auto pb-1 border-b border-slate-800 text-xs">
         {availableAdminTabs.map((tab) => {
           const TabIcon = {
             payments: CreditCard,
@@ -870,6 +881,7 @@ export const AdminUsersPage: React.FC<AdminUsersPageProps> = ({
             admins: ShieldCheck,
             users: Users,
             recovery: KeyRound,
+            chat: MessageCircle,
           }[tab.id];
           return (
             <button

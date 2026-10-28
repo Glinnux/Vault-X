@@ -111,9 +111,9 @@ export const AndroidBottomNav: React.FC<AndroidBottomNavProps> = ({
         {isAdmin ? (
           <button
             type="button"
-            onClick={() => onSelectView(currentView === 'admin' ? 'all' : 'admin')}
+            onClick={() => onSelectView(currentView === 'admin' || currentView === 'admin-chat' ? 'all' : 'admin')}
             className={`flex flex-col items-center justify-center flex-1 py-1 transition-all active:scale-90 ${
-              currentView === 'admin' ? 'text-purple-400 font-bold' : 'text-purple-300 hover:text-white'
+              currentView === 'admin' || currentView === 'admin-chat' ? 'text-purple-400 font-bold' : 'text-purple-300 hover:text-white'
             }`}
           >
             <Users className="w-5 h-5" />

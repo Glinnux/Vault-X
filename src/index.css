@@ -389,6 +389,13 @@ body,
     touch-action: manipulation;
   }
 
+  /* Keep navigation labels readable; scroll the menu instead of compressing buttons. */
+  .device-mobile .mobile-menu-scroll > button,
+  .device-mobile .admin-tab-scroll > button {
+    flex: 0 0 auto;
+    min-width: max-content;
+  }
+
   .device-mobile main {
     padding-left: max(0.75rem, env(safe-area-inset-left, 0px));
     padding-right: max(0.75rem, env(safe-area-inset-right, 0px));
@@ -546,6 +553,13 @@ body,
     transform: translateY(0) scale(1);
     filter: blur(0);
   }
+}
+
+.admin-chat-wallpaper {
+  background-color: #0b141a;
+  background-image: radial-gradient(rgba(72, 94, 106, 0.12) 1px, transparent 1px), radial-gradient(rgba(72, 94, 106, 0.08) 1px, transparent 1px);
+  background-position: 0 0, 18px 18px;
+  background-size: 36px 36px;
 }
 
 @media (prefers-reduced-motion: reduce) {

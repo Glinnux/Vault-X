@@ -262,7 +262,7 @@ export const VaultChatbot: React.FC<VaultChatbotProps> = ({
   };
 
   return (
-    <div className="fixed bottom-5 right-5 sm:bottom-6 sm:right-6 z-40 font-sans">
+    <div className="fixed bottom-20 right-3 sm:bottom-6 sm:right-6 z-50 font-sans">
       <AnimatePresence>
         {!isOpen ? (
           /* Floating Trigger Beacon */
@@ -274,27 +274,16 @@ export const VaultChatbot: React.FC<VaultChatbotProps> = ({
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
             onClick={() => setIsOpen(true)}
-            className="group relative flex items-center space-x-2.5 bg-slate-900/95 hover:bg-slate-800 text-slate-100 px-4 py-3 rounded-full border border-cyan-500/40 shadow-xl shadow-cyan-950/60 backdrop-blur-md cursor-pointer transition-all hover:border-cyan-400"
+            className="group relative flex h-14 w-14 items-center justify-center rounded-full border border-cyan-500/40 bg-slate-900/95 p-0 text-slate-100 shadow-xl shadow-cyan-950/60 backdrop-blur-md cursor-pointer transition-all hover:border-cyan-400 hover:bg-slate-800"
             title="Open CyberVault Storage & Security Guide"
           >
             {/* Holographic Pulse */}
-            <span className="relative flex h-3 w-3">
+            <span className="absolute right-1 top-1 flex h-2.5 w-2.5">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-3 w-3 bg-cyan-500"></span>
+              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-cyan-500"></span>
             </span>
 
-            <Bot className="w-5 h-5 text-cyan-400 group-hover:text-cyan-300 transition-colors" />
-            <div className="flex flex-col text-left">
-              <span className="text-xs font-semibold tracking-wide text-white flex items-center gap-1">
-                Storage Guide AI
-                <span className="bg-cyan-500/20 text-cyan-300 text-[9px] px-1.5 py-0.2 rounded font-mono uppercase">
-                  Online
-                </span>
-              </span>
-              <span className="text-[10px] text-slate-400 font-mono">
-                Ask how to store info
-              </span>
-            </div>
+            <Bot className="h-7 w-7 text-cyan-400 group-hover:text-cyan-300 transition-colors" />
           </motion.button>
         ) : (
           /* Chat Window Modal / Panel */

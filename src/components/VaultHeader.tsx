@@ -72,6 +72,7 @@ export const VaultHeader: React.FC<VaultHeaderProps> = ({
     isSuperAdminUser(user?.email) ||
     isUserAdmin(user?.email, user?.uid)
   );
+  const isAdminArea = currentView === 'admin' || currentView === 'admin-chat';
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -145,16 +146,16 @@ export const VaultHeader: React.FC<VaultHeaderProps> = ({
 
             {isAdmin && (
               <button
-                onClick={() => onSelectView(currentView === 'admin' ? 'all' : 'admin')}
+                onClick={() => onSelectView(isAdminArea ? 'all' : 'admin')}
                 className={`flex items-center space-x-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border transition-all cursor-pointer relative ${
-                  currentView === 'admin'
+                  isAdminArea
                     ? 'bg-purple-600 border-purple-400 text-white shadow-md shadow-purple-600/30'
                     : 'bg-purple-950/70 border-purple-800 text-purple-200 hover:bg-purple-900/80 hover:border-purple-600'
                 }`}
                 title="View All Registered Users & Payments (Admin Console)"
               >
                 <Users className="w-3.5 h-3.5 text-purple-300" />
-                <span>{currentView === 'admin' ? 'Exit Admin' : t('nav_admin', 'Admin Console')}</span>
+                <span>{isAdminArea ? 'Exit Admin' : t('nav_admin', 'Admin Console')}</span>
                 {pendingPaymentsCount > 0 && (
                   <span className="flex items-center gap-1 bg-amber-500 text-slate-950 font-bold text-[10px] px-1.5 py-0.2 rounded-full font-mono animate-pulse shadow-sm">
                     {pendingPaymentsCount} NEW
@@ -226,8 +227,8 @@ export const VaultHeader: React.FC<VaultHeaderProps> = ({
         </div>
 
         {/* View / Category navigation tabs (shown when signed in) */}
-        {user && currentView !== 'admin' && (
-          <div className="flex items-center space-x-1 sm:space-x-2 overflow-x-auto py-2.5 border-t border-emerald-950 text-xs">
+        {user && !isAdminArea && (
+          <div className="mobile-menu-scroll flex flex-nowrap items-center space-x-1 sm:space-x-2 overflow-x-auto py-2.5 border-t border-emerald-950 text-xs">
             <button
               onClick={() => onSelectView('all')}
               className={`px-3 py-1.5 rounded-lg font-medium transition-all cursor-pointer whitespace-nowrap flex items-center space-x-1.5 ${

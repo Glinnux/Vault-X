@@ -216,5 +216,43 @@ service cloud.firestore {
       );
       allow create, update, delete: if hasAdminPermission('addAdmins');
     }
+
+    // 9. Administrator conversations
+    match /admin_chats/{chatId} {
+      function canAccessChat() {
+        return isSuperAdmin() || (
+          isAdmin() && request.auth.uid in resource.data.participantIds
+        );
+      }
+
+      allow get, list: if canAccessChat();
+      allow create: if isAdmin() &&
+        request.auth.uid in incoming().participantIds &&
+        incoming().type in ['group', 'dm'] &&
+        incoming().participantIds is list &&
+        incoming().participantIds.size() >= 2 &&
+        incoming().participantIds.size() <= 100 &&
+        (incoming().type == 'dm' && incoming().participantIds.size() == 2 ||
+         incoming().type == 'group' && isSuperAdmin());
+      allow update: if canAccessChat() &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['updatedAt', 'lastMessagePreview']);
+      allow delete: if isSuperAdmin();
+
+      match /messages/{messageId} {
+        function canAccessParentChat() {
+          let chat = get(/databases/$(database)/documents/admin_chats/$(chatId));
+          return isSuperAdmin() || (
+            isAdmin() && request.auth.uid in chat.data.participantIds
+          );
+        }
+
+        allow get, list: if canAccessParentChat();
+        allow create: if canAccessParentChat() &&
+          incoming().senderId == request.auth.uid &&
+          incoming().text is string && incoming().text.size() >= 1 && incoming().text.size() <= 2000 &&
+          incoming().createdAt == request.time;
+        allow update, delete: if false;
+      }
+    }
   }
 }

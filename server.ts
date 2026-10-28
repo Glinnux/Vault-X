@@ -7,7 +7,7 @@ import { GoogleGenAI } from '@google/genai';
 import dotenv from 'dotenv';
 import nodemailer from 'nodemailer';
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'crypto';
-import { applicationDefault, getApps, initializeApp } from 'firebase-admin/app';
+import { applicationDefault, cert, getApps, initializeApp } from 'firebase-admin/app';
 import { getAuth as getAdminAuth } from 'firebase-admin/auth';
 import { getFirestore as getAdminFirestore, Timestamp } from 'firebase-admin/firestore';
 
@@ -84,6 +84,8 @@ function loadFirebaseServerConfig(): { apiKey: string; projectId: string; databa
 }
 
 const firebaseServerConfig = loadFirebaseServerConfig();
+const localServiceAccountPath = process.env.GOOGLE_APPLICATION_CREDENTIALS ||
+  path.join(process.env.USERPROFILE || '', 'Documents', 'VaultX', 'service-account.json');
 const SUPER_ADMIN_EMAILS = new Set([
   'oluwolefaith92@gmail.com',
   'faitholuwole6@gmail.com',
@@ -94,11 +96,15 @@ const SUPER_ADMIN_EMAILS = new Set([
 let adminAuth: ReturnType<typeof getAdminAuth> | null = null;
 let adminDb: ReturnType<typeof getAdminFirestore> | null = null;
 try {
-  if (process.env.GOOGLE_APPLICATION_CREDENTIALS || process.env.FIREBASE_CONFIG) {
+  const hasLocalServiceAccount = Boolean(localServiceAccountPath && fs.existsSync(localServiceAccountPath));
+  if (hasLocalServiceAccount || process.env.FIREBASE_CONFIG) {
+    const serviceAccount = hasLocalServiceAccount
+      ? JSON.parse(fs.readFileSync(localServiceAccountPath, 'utf8'))
+      : null;
     const adminApp = getApps().length
       ? getApps()[0]
       : initializeApp({
-          credential: applicationDefault(),
+          credential: serviceAccount ? cert(serviceAccount) : applicationDefault(),
           projectId: firebaseServerConfig.projectId || undefined,
         });
     adminAuth = getAdminAuth(adminApp);
@@ -229,6 +235,207 @@ async function requireApiUser(req: Request, res: Response, permission?: string |
   }
   return user;
 }
+
+async function requireAdminChatUser(req: Request, res: Response): Promise<(VerifiedApiUser & { isSuperAdmin: boolean }) | null> {
+  const user = await requireApiUser(req, res);
+  if (!user || !adminDb) {
+    if (user && !adminDb) res.status(503).json({ error: 'Admin chat is not configured on the server.' });
+    return null;
+  }
+  const isSuper = SUPER_ADMIN_EMAILS.has(user.email);
+  const adminRecord = await adminDb.collection('admins').doc(user.uid).get();
+  if (!isSuper && !adminRecord.exists) {
+    res.status(403).json({ error: 'Administrator access required.' });
+    return null;
+  }
+  return { ...user, isSuperAdmin: isSuper };
+}
+
+function firestoreMillis(value: any): number | null {
+  return value?.toMillis?.() || (typeof value === 'number' ? value : null);
+}
+
+app.get('/api/admin/chats', async (req: Request, res: Response) => {
+  const user = await requireAdminChatUser(req, res);
+  if (!user || !adminDb) return;
+  try {
+    const snapshot = await adminDb.collection('admin_chats').get();
+    const chats = snapshot.docs
+      .map((chatDoc) => {
+        const data = chatDoc.data();
+        return {
+          id: chatDoc.id,
+          type: data.type,
+          name: data.name,
+          participantIds: data.participantIds || [],
+          participantEmails: data.participantEmails || [],
+          createdBy: data.createdBy,
+          updatedAt: firestoreMillis(data.updatedAt),
+          lastMessagePreview: data.lastMessagePreview || '',
+        };
+      })
+      .filter((chat) => user.isSuperAdmin || chat.participantIds.includes(user.uid))
+      .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    const directory = (await adminDb.collection('admins').get()).docs.map((adminDoc) => ({
+      userId: adminDoc.id,
+      email: normalizeEmail(adminDoc.data().email),
+      displayName: adminDoc.data().displayName || 'Administrator',
+      role: 'admin',
+    }));
+    for (const email of SUPER_ADMIN_EMAILS) {
+      const superUser = await adminAuth?.getUserByEmail(email).catch(() => null);
+      if (superUser && !directory.some((admin) => admin.userId === superUser.uid)) {
+        directory.push({ userId: superUser.uid, email, displayName: superUser.displayName || 'Superadmin', role: 'superadmin' });
+      }
+    }
+    res.json({ chats, directory });
+  } catch (error) {
+    console.error('[Admin Chat] Could not load chats:', error);
+    res.status(500).json({ error: 'Could not load admin chats.' });
+  }
+});
+
+app.post('/api/admin/chats', async (req: Request, res: Response) => {
+  const user = await requireAdminChatUser(req, res);
+  if (!user || !adminDb) return;
+  const type = req.body?.type === 'group' ? 'group' : 'dm';
+  try {
+    let participantIds: string[] = [user.uid];
+    let participantEmails: string[] = [user.email];
+    let name = String(req.body?.groupName || '').trim().slice(0, 120) || 'Admin Operations Group';
+
+    if (type === 'group') {
+      if (!user.isSuperAdmin) {
+        res.status(403).json({ error: 'Only the superadmin can create group chats.' });
+        return;
+      }
+      const adminsSnapshot = await adminDb.collection('admins').get();
+      participantIds = adminsSnapshot.docs.map((adminDoc) => adminDoc.id);
+      participantEmails = adminsSnapshot.docs.map((adminDoc) => normalizeEmail(adminDoc.data().email)).filter(Boolean);
+      for (const email of SUPER_ADMIN_EMAILS) {
+        const superUser = await adminAuth?.getUserByEmail(email).catch(() => null);
+        if (superUser && !participantIds.includes(superUser.uid)) {
+          participantIds.push(superUser.uid);
+          participantEmails.push(email);
+        }
+      }
+    } else {
+      const targetId = String(req.body?.targetId || '').trim();
+      if (!targetId || targetId === user.uid) {
+        res.status(400).json({ error: 'Choose another administrator for the DM.' });
+        return;
+      }
+      const targetIsSuper = await Promise.any([...SUPER_ADMIN_EMAILS].map(async (email) => {
+        const target = await adminAuth?.getUserByEmail(email);
+        return target?.uid === targetId;
+      })).catch(() => false);
+      const targetAdmin = await adminDb.collection('admins').doc(targetId).get();
+      if (!targetIsSuper && !targetAdmin.exists) {
+        res.status(403).json({ error: 'That account is not an administrator.' });
+        return;
+      }
+      const targetUser = await adminAuth?.getUser(targetId);
+      participantIds.push(targetId);
+      participantEmails.push(normalizeEmail(targetUser?.email));
+      name = targetUser?.displayName || targetUser?.email || 'Administrator';
+    }
+
+    const chatRef = await adminDb.collection('admin_chats').add({
+      type,
+      name,
+      participantIds,
+      participantEmails,
+      createdBy: user.uid,
+      createdAt: Timestamp.now(),
+      updatedAt: Timestamp.now(),
+      lastMessagePreview: '',
+    });
+    res.json({ chat: { id: chatRef.id, type, name, participantIds, participantEmails, createdBy: user.uid, createdAt: Date.now(), updatedAt: Date.now(), lastMessagePreview: '' } });
+  } catch (error) {
+    console.error('[Admin Chat] Could not create chat:', error);
+    res.status(500).json({ error: 'Could not create the admin chat.' });
+  }
+});
+
+app.get('/api/admin/chats/:chatId/messages', async (req: Request, res: Response) => {
+  const user = await requireAdminChatUser(req, res);
+  if (!user || !adminDb) return;
+  try {
+    const chatSnapshot = await adminDb.collection('admin_chats').doc(req.params.chatId).get();
+    const chat = chatSnapshot.data();
+    if (!chatSnapshot.exists || (!user.isSuperAdmin && !chat?.participantIds?.includes(user.uid))) {
+      res.status(404).json({ error: 'Chat not found.' });
+      return;
+    }
+    const snapshot = await adminDb.collection('admin_chats').doc(req.params.chatId).collection('messages').get();
+    const messages = snapshot.docs.map((messageDoc) => ({ id: messageDoc.id, ...messageDoc.data(), createdAt: firestoreMillis(messageDoc.data().createdAt) }))
+      .sort((a: any, b: any) => (a.createdAt || 0) - (b.createdAt || 0));
+    res.json({ messages });
+  } catch (error) {
+    console.error('[Admin Chat] Could not load messages:', error);
+    res.status(500).json({ error: 'Could not load chat messages.' });
+  }
+});
+
+app.post('/api/admin/chats/:chatId/leave', async (req: Request, res: Response) => {
+  const user = await requireAdminChatUser(req, res);
+  if (!user || !adminDb) return;
+  try {
+    const chatRef = adminDb.collection('admin_chats').doc(req.params.chatId);
+    await adminDb.runTransaction(async (transaction) => {
+      const snapshot = await transaction.get(chatRef);
+      const chat = snapshot.data();
+      if (!snapshot.exists || !chat || chat.type !== 'group') {
+        throw new Error('Only group chats can be left.');
+      }
+      const participantIds = Array.isArray(chat.participantIds) ? chat.participantIds : [];
+      if (!participantIds.includes(user.uid)) {
+        throw new Error('You are not a member of this group.');
+      }
+      const participantEmails = Array.isArray(chat.participantEmails) ? chat.participantEmails : [];
+      transaction.update(chatRef, {
+        participantIds: participantIds.filter((participantId: string) => participantId !== user.uid),
+        participantEmails: participantEmails.filter((email: string) => normalizeEmail(email) !== user.email),
+        updatedAt: Timestamp.now(),
+      });
+    });
+    res.json({ message: 'You left the group chat.' });
+  } catch (error: any) {
+    const message = error?.message || 'Could not leave the group chat.';
+    res.status(message.includes('Only group') || message.includes('not a member') ? 400 : 500).json({ error: message });
+  }
+});
+
+app.post('/api/admin/chats/:chatId/messages', async (req: Request, res: Response) => {
+  const user = await requireAdminChatUser(req, res);
+  if (!user || !adminDb) return;
+  const text = String(req.body?.text || '').trim();
+  if (!text || text.length > 2000) {
+    res.status(400).json({ error: 'Message must contain between 1 and 2000 characters.' });
+    return;
+  }
+  try {
+    const chatRef = adminDb.collection('admin_chats').doc(req.params.chatId);
+    const chatSnapshot = await chatRef.get();
+    const chat = chatSnapshot.data();
+    if (!chatSnapshot.exists || (!user.isSuperAdmin && !chat?.participantIds?.includes(user.uid))) {
+      res.status(404).json({ error: 'Chat not found.' });
+      return;
+    }
+    const messageRef = await chatRef.collection('messages').add({
+      senderId: user.uid,
+      senderEmail: user.email,
+      senderName: user.email,
+      text,
+      createdAt: Timestamp.now(),
+    });
+    await chatRef.update({ updatedAt: Timestamp.now(), lastMessagePreview: text.slice(0, 140) });
+    res.json({ message: { id: messageRef.id, senderId: user.uid, senderEmail: user.email, senderName: user.email, text, createdAt: Date.now() } });
+  } catch (error) {
+    console.error('[Admin Chat] Could not send message:', error);
+    res.status(500).json({ error: 'Could not send the message.' });
+  }
+});
 
 app.post('/api/recovery/issue', rateLimit(3, 10 * 60_000), async (req: Request, res: Response) => {
   const user = await requireApiUser(req, res);

@@ -67,7 +67,7 @@ export interface UserAccount {
   updatedAt: any;
 }
 
-export type VaultViewMode = 'all' | 'credentials' | 'documents' | 'favorites' | 'admin' | 'payment' | 'support';
+export type VaultViewMode = 'all' | 'credentials' | 'documents' | 'favorites' | 'admin' | 'admin-chat' | 'payment' | 'support';
 
 export interface UserSubscription {
   plan: UserPlanTier;

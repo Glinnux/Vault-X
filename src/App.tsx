@@ -21,6 +21,7 @@ import { AddVaultItemModal } from './components/AddVaultItemModal';
 import { EditVaultItemModal } from './components/EditVaultItemModal';
 import { AuthModal } from './components/AuthModal';
 import { AdminUsersPage } from './components/AdminUsersPage';
+import { AdminChatPage } from './components/AdminChatPage';
 import { AndroidBottomNav } from './components/AndroidBottomNav';
 import { AndroidInstallPrompt } from './components/AndroidInstallPrompt';
 import { usePWAInstall } from './hooks/usePWAInstall';
@@ -417,7 +418,7 @@ function VaultApp() {
         )}
 
         {/* Futuristic Telemetry HUD Bar (when user is active and not on admin, payment, or support page) */}
-        {user && viewMode !== 'admin' && viewMode !== 'payment' && viewMode !== 'support' && (
+        {user && viewMode !== 'admin' && viewMode !== 'admin-chat' && viewMode !== 'payment' && viewMode !== 'support' && (
           <FuturisticHudBar
             totalItems={filteredItems.length}
             userEmail={user.email}
@@ -431,6 +432,7 @@ function VaultApp() {
           isAdmin ? (
             <AdminUsersPage
               onBackToVault={() => setViewMode('all')}
+              onOpenAdminChat={() => setViewMode('admin-chat')}
               onToast={(msg) => showToast(msg)}
             />
           ) : (
@@ -440,6 +442,23 @@ function VaultApp() {
                 onClick={() => setViewMode('all')}
                 className="mt-3 text-xs text-cyan-400 underline cursor-pointer"
               >
+                Back to My Personal Vault
+              </button>
+            </div>
+          )
+        ) : viewMode === 'admin-chat' ? (
+          isAdmin ? (
+            <AdminChatPage
+              admins={[]}
+              currentUser={user}
+              isSuperAdmin={isSuperAdminUser(user?.email)}
+              onToast={(msg, type) => showToast(msg, type)}
+              onBackToConsole={() => setViewMode('admin')}
+            />
+          ) : (
+            <div className="p-8 text-center bg-slate-900/60 border border-slate-800 rounded-2xl tech-corners">
+              <p className="text-sm text-rose-400">Unauthorized: Admin chat is restricted.</p>
+              <button onClick={() => setViewMode('all')} className="mt-3 text-xs text-cyan-400 underline cursor-pointer">
                 Back to My Personal Vault
               </button>
             </div>
