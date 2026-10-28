@@ -3,6 +3,7 @@ import {
   User,
   onAuthStateChanged,
   signInWithPopup,
+  getAdditionalUserInfo,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   updateProfile,
@@ -28,6 +29,8 @@ interface AuthContextType {
   resetPassword: (email: string) => Promise<void>;
   signOut: () => Promise<void>;
   clearAuthError: () => void;
+  recoveryNotice: { code: string; expiresAt: number } | null;
+  clearRecoveryNotice: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -39,7 +42,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [bannedReason, setBannedReason] = useState('');
   const [authError, setAuthError] = useState<string | null>(null);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [recoveryNotice, setRecoveryNotice] = useState<{ code: string; expiresAt: number } | null>(null);
   const isSigningInRef = useRef(false);
+
+  const issueRecoveryCode = async (account: User) => {
+    try {
+      const token = await account.getIdToken();
+      const response = await fetch('/api/recovery/issue', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!response.ok) {
+        console.warn('Recovery code was not issued:', await response.text());
+        return;
+      }
+      const data = await response.json();
+      if (data.code) {
+        setRecoveryNotice({ code: data.code, expiresAt: Number(data.expiresAt) });
+      }
+    } catch (error) {
+      console.warn('Recovery code request failed:', error);
+    }
+  };
 
   useEffect(() => {
     // Clear any residual demo storage keys
@@ -159,7 +183,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     isSigningInRef.current = true;
     try {
       setAuthError(null);
-      await signInWithPopup(auth, googleProvider);
+      const result = await signInWithPopup(auth, googleProvider);
+      if (getAdditionalUserInfo(result)?.isNewUser) {
+        await issueRecoveryCode(result.user);
+      }
       setIsAuthModalOpen(false);
     } catch (err: any) {
       if (err?.code === 'auth/cancelled-popup-request') return;
@@ -217,6 +244,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (displayName && res.user) {
         await updateProfile(res.user, { displayName: displayName.trim() });
       }
+      await issueRecoveryCode(res.user);
       setIsAuthModalOpen(false);
     } catch (err: any) {
       console.error('Email registration failed:', err);
@@ -260,6 +288,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const clearAuthError = () => setAuthError(null);
+  const clearRecoveryNotice = () => setRecoveryNotice(null);
   const openAuthModal = () => {
     setAuthError(null);
     setIsAuthModalOpen(true);
@@ -286,6 +315,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         resetPassword,
         signOut,
         clearAuthError,
+        recoveryNotice,
+        clearRecoveryNotice,
       }}
     >
       {children}

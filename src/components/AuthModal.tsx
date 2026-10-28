@@ -31,8 +31,9 @@ export const AuthModal: React.FC = () => {
     clearAuthError,
   } = useAuth();
 
-  const [mode, setMode] = useState<'signin' | 'signup' | 'forgot'>('signin');
+  const [mode, setMode] = useState<'signin' | 'signup' | 'forgot' | 'recover-email'>('signin');
   const [email, setEmail] = useState('');
+  const [recoveryCode, setRecoveryCode] = useState('');
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -58,9 +59,19 @@ export const AuthModal: React.FC = () => {
       } else if (mode === 'forgot') {
         await resetPassword(email);
         setLocalSuccessMsg(`Password reset link sent to ${email}. Please check your inbox.`);
+      } else if (mode === 'recover-email') {
+        const response = await fetch('/api/recovery/request-email-change', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code: recoveryCode, newEmail: email }),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || 'Could not submit the recovery request.');
+        setLocalSuccessMsg(data.message || 'Your request was sent to the administrators for approval.');
       }
-    } catch (_err) {
+    } catch (err: any) {
       // Error is caught and formatted in AuthContext and displayed via authError
+      if (mode === 'recover-email') setLocalSuccessMsg(err?.message || 'Could not submit the recovery request.');
     } finally {
       setIsSubmitting(false);
     }
@@ -100,6 +111,8 @@ export const AuthModal: React.FC = () => {
             <h3 className="text-lg font-extrabold text-white tracking-tight font-mono">
               {mode === 'forgot'
                 ? 'Reset Password'
+                : mode === 'recover-email'
+                ? 'Recover Sign-In Email'
                 : mode === 'signup'
                 ? 'Create Vault X Account'
                 : 'Access Vault X'}
@@ -111,7 +124,7 @@ export const AuthModal: React.FC = () => {
         </div>
 
         {/* Primary Mode Tabs (Sign In vs Register) */}
-        {mode !== 'forgot' && (
+        {mode !== 'forgot' && mode !== 'recover-email' && (
           <div className="grid grid-cols-2 gap-1.5 p-1 bg-black/60 border border-emerald-950 rounded-xl my-3 text-xs font-medium">
             <button
               type="button"
@@ -235,9 +248,24 @@ export const AuthModal: React.FC = () => {
             </div>
           )}
 
+          {mode === 'recover-email' && (
+            <div>
+              <label className="block text-xs font-mono text-slate-300 mb-1">6-Character Recovery Code</label>
+              <input
+                type="text"
+                required
+                maxLength={6}
+                value={recoveryCode}
+                onChange={(e) => setRecoveryCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))}
+                placeholder="ABC123"
+                className="w-full bg-slate-950/80 border border-slate-800 rounded-xl px-3 py-2 text-sm tracking-[0.3em] text-white placeholder-slate-600 focus:outline-none focus:border-cyan-500 font-mono"
+              />
+            </div>
+          )}
+
           <div>
             <label className="block text-xs font-mono text-slate-300 mb-1">
-              Email Address
+              {mode === 'recover-email' ? 'New Email Address' : 'Email Address'}
             </label>
             <div className="relative">
               <Mail className="w-4 h-4 absolute left-3 top-2.5 text-slate-500" />
@@ -252,7 +280,7 @@ export const AuthModal: React.FC = () => {
             </div>
           </div>
 
-          {mode !== 'forgot' && (
+          {mode !== 'forgot' && mode !== 'recover-email' && (
             <div>
               <div className="flex items-center justify-between mb-1">
                 <label className="text-xs font-mono text-slate-300">Password</label>
@@ -304,11 +332,27 @@ export const AuthModal: React.FC = () => {
                 ? 'Register & Create Vault X Account'
                 : mode === 'forgot'
                 ? 'Send Password Reset Link'
+                : mode === 'recover-email'
+                ? 'Submit Recovery Request'
                 : 'Sign In to Vault X'}
             </span>
             <ArrowRight className="w-3.5 h-3.5 ml-1" />
           </button>
         </form>
+
+        {mode === 'signin' && (
+          <button
+            type="button"
+            onClick={() => {
+              clearAuthError();
+              setLocalSuccessMsg(null);
+              setMode('recover-email');
+            }}
+            className="mt-3 w-full text-center text-[11px] text-amber-300 hover:text-amber-200 cursor-pointer"
+          >
+            Forgot your sign-in email? Use a recovery code
+          </button>
+        )}
 
         {/* Collapsible Troubleshooting & Local Run Section */}
         <div className="mt-4 pt-3 border-t border-slate-800/80">

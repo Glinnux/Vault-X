@@ -6,6 +6,10 @@ import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
 import dotenv from 'dotenv';
 import nodemailer from 'nodemailer';
+import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'crypto';
+import { applicationDefault, getApps, initializeApp } from 'firebase-admin/app';
+import { getAuth as getAdminAuth } from 'firebase-admin/auth';
+import { getFirestore as getAdminFirestore, Timestamp } from 'firebase-admin/firestore';
 
 dotenv.config();
 
@@ -17,6 +21,386 @@ const PORT = Number(process.env.PORT) || 3000;
 const SUPPORT_EMAIL = 'oluwolefaith92@gmail.com';
 
 app.use(express.json({ limit: '12mb' }));
+
+// Basic abuse protection for the local/API server. Production deployments should
+// also enforce rate limits at the hosting proxy or API gateway.
+const requestBuckets = new Map<string, { startedAt: number; count: number }>();
+function rateLimit(maxRequests: number, windowMs: number) {
+  return (req: Request, res: Response, next: () => void) => {
+    const key = `${req.ip || 'unknown'}:${req.path}`;
+    const now = Date.now();
+    const bucket = requestBuckets.get(key);
+    if (!bucket || now - bucket.startedAt >= windowMs) {
+      requestBuckets.set(key, { startedAt: now, count: 1 });
+      next();
+      return;
+    }
+    bucket.count += 1;
+    if (bucket.count > maxRequests) {
+      res.status(429).json({ error: 'Too many requests. Please try again shortly.' });
+      return;
+    }
+    next();
+  };
+}
+
+app.use((_req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  next();
+});
+
+type VerifiedApiUser = {
+  uid: string;
+  email: string;
+  idToken: string;
+  permissions: Record<string, boolean>;
+};
+
+function loadFirebaseServerConfig(): { apiKey: string; projectId: string; databaseId: string } {
+  const fallback = {
+    apiKey: process.env.FIREBASE_API_KEY || '',
+    projectId: process.env.FIREBASE_PROJECT_ID || '',
+    databaseId: process.env.FIREBASE_DATABASE_ID || '(default)',
+  };
+  const candidates = [
+    path.resolve(__dirname, 'firebase-applet-config.json'),
+    path.resolve(process.cwd(), 'firebase-applet-config.json'),
+  ];
+  for (const candidate of candidates) {
+    try {
+      const config = JSON.parse(fs.readFileSync(candidate, 'utf8')) as Record<string, string>;
+      return {
+        apiKey: process.env.FIREBASE_API_KEY || config.apiKey || fallback.apiKey,
+        projectId: process.env.FIREBASE_PROJECT_ID || config.projectId || fallback.projectId,
+        databaseId: process.env.FIREBASE_DATABASE_ID || config.firestoreDatabaseId || fallback.databaseId,
+      };
+    } catch (_error) {
+      // Try the next location or environment-only configuration.
+    }
+  }
+  return fallback;
+}
+
+const firebaseServerConfig = loadFirebaseServerConfig();
+const SUPER_ADMIN_EMAILS = new Set([
+  'oluwolefaith92@gmail.com',
+  'faitholuwole6@gmail.com',
+]);
+
+// Firebase Admin is initialized only on the trusted server. The service-account
+// file must never be imported by the browser or committed to the repository.
+let adminAuth: ReturnType<typeof getAdminAuth> | null = null;
+let adminDb: ReturnType<typeof getAdminFirestore> | null = null;
+try {
+  if (process.env.GOOGLE_APPLICATION_CREDENTIALS || process.env.FIREBASE_CONFIG) {
+    const adminApp = getApps().length
+      ? getApps()[0]
+      : initializeApp({
+          credential: applicationDefault(),
+          projectId: firebaseServerConfig.projectId || undefined,
+        });
+    adminAuth = getAdminAuth(adminApp);
+    adminDb = getAdminFirestore(adminApp, firebaseServerConfig.databaseId || '(default)');
+    console.log('[Recovery] Firebase Admin SDK enabled.');
+  } else {
+    console.warn('[Recovery] Firebase Admin SDK is disabled: trusted credentials are not configured.');
+  }
+} catch (error) {
+  console.error('[Recovery] Firebase Admin SDK could not initialize:', error);
+}
+
+const RECOVERY_CODE_TTL_MS = 15 * 60 * 1000;
+const RECOVERY_MAX_ATTEMPTS = 5;
+
+function normalizeEmail(value: unknown): string {
+  return String(value || '').trim().toLowerCase();
+}
+
+function normalizeRecoveryCode(value: unknown): string {
+  return String(value || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+
+function recoveryLookupId(code: string): string {
+  return createHash('sha256').update(code).digest('hex');
+}
+
+function generateRecoveryCode(): string {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const bytes = randomBytes(6);
+  return Array.from(bytes, (byte) => alphabet[byte % alphabet.length]).join('');
+}
+
+function hashRecoveryCode(code: string, salt: Buffer): Buffer {
+  return scryptSync(code, salt, 32);
+}
+
+function recoveryCodeMatches(code: string, saltHex: string, hashHex: string): boolean {
+  try {
+    const actual = hashRecoveryCode(code, Buffer.from(saltHex, 'hex'));
+    const expected = Buffer.from(hashHex, 'hex');
+    return actual.length === expected.length && timingSafeEqual(actual, expected);
+  } catch (_error) {
+    return false;
+  }
+}
+
+async function notifyRecoveryAdmins(subject: string, body: string, fields: Record<string, string>) {
+  if (!adminDb) return;
+  const recipients = new Set(SUPER_ADMIN_EMAILS);
+  try {
+    const snapshot = await adminDb.collection('admins').get();
+    snapshot.docs.forEach((doc) => {
+      const email = normalizeEmail(doc.data().email);
+      if (email) recipients.add(email);
+    });
+  } catch (error) {
+    console.error('[Recovery] Could not load appointed admins:', error);
+  }
+
+  await Promise.allSettled(
+    [...recipients].map((recipientEmail) =>
+      dispatchEmailNotification({
+        subject,
+        recipientEmail,
+        fields,
+        textContent: body,
+      })
+    )
+  );
+}
+
+async function loadAdminPermissions(uid: string, idToken: string): Promise<Record<string, boolean>> {
+  if (!firebaseServerConfig.projectId) return {};
+  const url = `https://firestore.googleapis.com/v1/projects/${firebaseServerConfig.projectId}/databases/${firebaseServerConfig.databaseId}/documents/admins/${uid}`;
+  const response = await fetch(url, { headers: { Authorization: `Bearer ${idToken}` } });
+  if (!response.ok) return {};
+  const document = (await response.json()) as any;
+  const fields = document.fields?.permissions?.mapValue?.fields || {};
+  return Object.fromEntries(
+    Object.entries(fields).map(([key, value]: [string, any]) => [key, value.booleanValue === true])
+  );
+}
+
+async function verifyApiUser(req: Request): Promise<VerifiedApiUser | null> {
+  const authorization = req.header('authorization') || '';
+  const idToken = authorization.startsWith('Bearer ') ? authorization.slice(7).trim() : '';
+  if (!idToken || !firebaseServerConfig.apiKey) return null;
+
+  try {
+    const response = await fetch(
+      `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${encodeURIComponent(firebaseServerConfig.apiKey)}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idToken }),
+      }
+    );
+    if (!response.ok) return null;
+    const data = (await response.json()) as any;
+    const account = data.users?.[0];
+    if (!account?.localId || account.disabled) return null;
+    return {
+      uid: account.localId,
+      email: String(account.email || '').toLowerCase(),
+      idToken,
+      permissions: await loadAdminPermissions(account.localId, idToken),
+    };
+  } catch (_error) {
+    return null;
+  }
+}
+
+async function requireApiUser(req: Request, res: Response, permission?: string | string[]) {
+  const user = await verifyApiUser(req);
+  if (!user) {
+    res.status(401).json({ error: 'Authentication required.' });
+    return null;
+  }
+  if (permission) {
+    const allowed = SUPER_ADMIN_EMAILS.has(user.email) || (Array.isArray(permission)
+      ? permission.some((key) => user.permissions[key] === true)
+      : user.permissions[permission] === true);
+    if (!allowed) {
+      res.status(403).json({ error: 'Administrator permission required.' });
+      return null;
+    }
+  }
+  return user;
+}
+
+app.post('/api/recovery/issue', rateLimit(3, 10 * 60_000), async (req: Request, res: Response) => {
+  const user = await requireApiUser(req, res);
+  if (!user) return;
+  if (!adminDb || !adminAuth) {
+    res.status(503).json({ error: 'Secure recovery is not configured on the server yet.' });
+    return;
+  }
+
+  try {
+    const account = await adminAuth.getUser(user.uid);
+    const code = generateRecoveryCode();
+    const salt = randomBytes(16);
+    const now = Date.now();
+    const expiresAt = now + RECOVERY_CODE_TTL_MS;
+    const requestRef = adminDb.collection('recovery_requests').doc(recoveryLookupId(code));
+
+    await requestRef.set({
+      uid: user.uid,
+      email: normalizeEmail(account.email || user.email),
+      displayName: account.displayName || '',
+      codeHash: hashRecoveryCode(code, salt).toString('hex'),
+      codeSalt: salt.toString('hex'),
+      status: 'issued',
+      attempts: 0,
+      createdAt: Timestamp.fromMillis(now),
+      expiresAt: Timestamp.fromMillis(expiresAt),
+    });
+
+    await notifyRecoveryAdmins(
+      `[Vault X] Recovery code issued for UID ${user.uid}`,
+      `A recovery code was issued for a Vault X account. No recovery code is included in this notification.\n\nUID: ${user.uid}\nAccount email: ${account.email || user.email}\nExpires: ${new Date(expiresAt).toISOString()}\n\nAn admin approval is required before any email change can happen.`,
+      { UID: user.uid, 'Account email': account.email || user.email, Expires: new Date(expiresAt).toISOString() }
+    );
+
+    res.json({ code, expiresAt });
+  } catch (error) {
+    console.error('[Recovery] Could not issue recovery code:', error);
+    res.status(500).json({ error: 'Could not issue a recovery code.' });
+  }
+});
+
+app.post('/api/recovery/request-email-change', rateLimit(5, 10 * 60_000), async (req: Request, res: Response) => {
+  const code = normalizeRecoveryCode(req.body?.code);
+  const newEmail = normalizeEmail(req.body?.newEmail);
+  if (code.length !== 6 || !/^[A-Z0-9]{6}$/.test(code) || !/^\S+@\S+\.\S+$/.test(newEmail)) {
+    res.status(400).json({ error: 'Enter a valid 6-character recovery code and a valid new email address.' });
+    return;
+  }
+  if (!adminDb || !adminAuth) {
+    res.status(503).json({ error: 'Secure recovery is not configured on the server yet.' });
+    return;
+  }
+
+  try {
+    const requestRef = adminDb.collection('recovery_requests').doc(recoveryLookupId(code));
+    const snapshot = await requestRef.get();
+    const request = snapshot.data();
+    if (!snapshot.exists || !request) {
+      res.status(400).json({ error: 'The code is invalid or expired.' });
+      return;
+    }
+
+    const expiresAt = request.expiresAt?.toMillis?.() || 0;
+    if (request.status !== 'issued' || expiresAt <= Date.now()) {
+      res.status(400).json({ error: 'The code is invalid or expired.' });
+      return;
+    }
+
+    const attempts = Number(request.attempts || 0) + 1;
+    if (attempts > RECOVERY_MAX_ATTEMPTS) {
+      await requestRef.update({ attempts, status: 'locked', updatedAt: Timestamp.now() });
+      res.status(429).json({ error: 'Too many attempts. Ask an administrator for help.' });
+      return;
+    }
+    if (!recoveryCodeMatches(code, String(request.codeSalt), String(request.codeHash))) {
+      await requestRef.update({ attempts, updatedAt: Timestamp.now() });
+      res.status(400).json({ error: 'The code is invalid or expired.' });
+      return;
+    }
+
+    const existing = await adminAuth.getUserByEmail(newEmail).catch(() => null);
+    if (existing && existing.uid !== request.uid) {
+      res.status(409).json({ error: 'That email is already linked to another Vault X account.' });
+      return;
+    }
+
+    await requestRef.update({
+      status: 'pending_approval',
+      proposedEmail: newEmail,
+      attempts,
+      requestedAt: Timestamp.now(),
+    });
+
+    await notifyRecoveryAdmins(
+      `[Vault X] APPROVAL REQUIRED: email recovery for UID ${request.uid}`,
+      `A user has requested to change their Vault X sign-in email. Review this request in the Admin Console before approving.\n\nUID: ${request.uid}\nCurrent email: ${request.email}\nRequested email: ${newEmail}\n\nThe recovery code was verified successfully.`,
+      { UID: String(request.uid), 'Current email': String(request.email), 'Requested email': newEmail, Status: 'Pending approval' }
+    );
+
+    res.json({ message: 'Your request was verified and sent to the administrators for approval.' });
+  } catch (error) {
+    console.error('[Recovery] Could not process email recovery request:', error);
+    res.status(500).json({ error: 'Could not process the recovery request.' });
+  }
+});
+
+app.get('/api/admin/recovery-requests', async (req: Request, res: Response) => {
+  const user = await requireApiUser(req, res, ['addAdmins', 'answerComplaints']);
+  if (!user || !adminDb) return;
+  try {
+    const snapshot = await adminDb.collection('recovery_requests').get();
+    const requests = snapshot.docs
+      .map((doc) => ({ id: doc.id, ...doc.data() }))
+      .filter((request: any) => request.status === 'pending_approval')
+      .sort((a: any, b: any) => (b.requestedAt?.toMillis?.() || 0) - (a.requestedAt?.toMillis?.() || 0))
+      .map((request: any) => ({
+        id: request.id,
+        uid: request.uid,
+        currentEmail: request.email,
+        proposedEmail: request.proposedEmail,
+        requestedAt: request.requestedAt?.toMillis?.() || null,
+        expiresAt: request.expiresAt?.toMillis?.() || null,
+      }));
+    res.json({ requests });
+  } catch (error) {
+    console.error('[Recovery] Could not list recovery requests:', error);
+    res.status(500).json({ error: 'Could not load recovery requests.' });
+  }
+});
+
+app.post('/api/admin/recovery-requests/:id/decision', async (req: Request, res: Response) => {
+  const user = await requireApiUser(req, res, ['addAdmins', 'answerComplaints']);
+  if (!user || !adminDb || !adminAuth) return;
+  const approved = req.body?.approved === true;
+  const requestRef = adminDb.collection('recovery_requests').doc(req.params.id);
+
+  try {
+    const snapshot = await requestRef.get();
+    const request = snapshot.data();
+    if (!snapshot.exists || !request || request.status !== 'pending_approval') {
+      res.status(404).json({ error: 'This recovery request is no longer pending.' });
+      return;
+    }
+
+    if (!approved) {
+      await requestRef.update({ status: 'rejected', rejectedBy: user.uid, rejectedAt: Timestamp.now() });
+      res.json({ message: 'Recovery request rejected.' });
+      return;
+    }
+
+    const proposedEmail = normalizeEmail(request.proposedEmail);
+    if (!/^\S+@\S+\.\S+$/.test(proposedEmail)) {
+      res.status(400).json({ error: 'The requested email is invalid.' });
+      return;
+    }
+    const existing = await adminAuth.getUserByEmail(proposedEmail).catch(() => null);
+    if (existing && existing.uid !== request.uid) {
+      res.status(409).json({ error: 'That email is already linked to another account.' });
+      return;
+    }
+
+    await adminAuth.updateUser(request.uid, { email: proposedEmail, emailVerified: false });
+    await adminDb.collection('users').doc(request.uid).set({ email: proposedEmail, updatedAt: Timestamp.now() }, { merge: true });
+    await requestRef.update({ status: 'approved', approvedBy: user.uid, approvedAt: Timestamp.now(), usedAt: Timestamp.now() });
+
+    res.json({ message: 'Recovery approved. The user can now sign in with the new email address.' });
+  } catch (error) {
+    console.error('[Recovery] Could not decide recovery request:', error);
+    res.status(500).json({ error: 'Could not update the recovery request.' });
+  }
+});
 
 // Initialize Gemini SDK with User-Agent telemetry
 const apiKey = process.env.GEMINI_API_KEY;
@@ -69,7 +453,16 @@ ${SUPPORT_EMAIL}
 Example response for abstract inquiries/complaints:
 "For abstract inquiries, bug reports, feedback, or complaints, please reach out directly to the vault administrator at: **${SUPPORT_EMAIL}**."
 
-Keep your tone professional, high-tech cyber-security oriented, concise, and helpful. Always provide actionable, step-by-step instructions.`;
+Keep your tone professional, high-tech cyber-security oriented, concise, and helpful. Always provide actionable, step-by-step instructions.
+
+INTELLIGENT CONVERSATION RULES:
+- Answer Vault X questions naturally instead of repeating a fixed script.
+- Use the supplied safe vault summary to answer count and organization questions.
+- Never ask for or repeat passwords, secret notes, document contents, recovery phrases, API keys, or payment credentials. The summary never contains those secrets.
+- Troubleshoot user-reported problems first with practical checks. Only direct genuine complaints, billing disputes, security incidents, or human-support requests to ${SUPPORT_EMAIL}.
+- Ask one focused clarifying question when the request is ambiguous.
+- For simple greetings such as "hello", "hi", or "hey", reply with a short friendly welcome and ask how you can help. Do not mention an empty vault or the "+ Add Item" button unless the user asks how to add or store something.
+- Never claim to have completed an action unless the interface actually performed it, and never invent features or security guarantees.`;
 
 // Intelligent fallback logic when Gemini API key is unavailable or fails
 function getFallbackResponse(query: string): string {
@@ -145,15 +538,29 @@ All data is strictly isolated to your authenticated account.
 }
 
 // Chat API endpoint
-app.post('/api/chat', async (req: Request, res: Response) => {
+app.post('/api/chat', rateLimit(20, 60_000), async (req: Request, res: Response) => {
   try {
-    const { message, history } = req.body;
+    const { message, history, vaultSummary } = req.body;
     if (!message || typeof message !== 'string') {
       res.status(400).json({ error: 'Message is required' });
       return;
     }
 
     const trimmed = message.trim();
+    const authenticatedUser = await verifyApiUser(req);
+    if (!authenticatedUser) {
+      res.status(401).json({ error: 'Authentication required.' });
+      return;
+    }
+
+    if (/^(hi|hello|hey|good morning|good afternoon|good evening)[!.?,\s]*$/i.test(trimmed)) {
+      res.json({
+        reply: 'Hello! How can I help you use Vault X today?',
+        supportEmail: SUPPORT_EMAIL,
+        source: 'greeting',
+      });
+      return;
+    }
 
     // Check if Gemini client is available
     if (aiClient) {
@@ -173,6 +580,23 @@ app.post('/api/chat', async (req: Request, res: Response) => {
             }
           }
         }
+
+        const safeSummary = vaultSummary && typeof vaultSummary === 'object'
+          ? JSON.stringify({
+              total: Number(vaultSummary.total) || 0,
+              credentials: Number(vaultSummary.credentials) || 0,
+              documents: Number(vaultSummary.documents) || 0,
+              favorites: Number(vaultSummary.favorites) || 0,
+              categories: Array.isArray(vaultSummary.categories)
+                ? vaultSummary.categories.filter((category: unknown) => typeof category === 'string').slice(0, 20)
+                : [],
+            })
+          : '{}';
+
+        contents.push({
+          role: 'user',
+          parts: [{ text: `Safe current vault summary (metadata only; no secrets): ${safeSummary}` }],
+        });
 
         // Add latest user message
         contents.push({
@@ -473,7 +897,9 @@ app.get('/api/support-info', (_req: Request, res: Response) => {
 });
 
 // Endpoint to get all payment submissions for Admin Console
-app.get('/api/admin/payments', (_req: Request, res: Response) => {
+app.get('/api/admin/payments', async (req: Request, res: Response) => {
+  const user = await requireApiUser(req, res, ['viewTransactions', 'receiveTransactionNotices']);
+  if (!user) return;
   const list = loadPaymentSubmissions();
   res.json({
     success: true,
@@ -483,7 +909,9 @@ app.get('/api/admin/payments', (_req: Request, res: Response) => {
 });
 
 // Endpoint to update payment submission status
-app.post('/api/admin/payments/:id/status', (req: Request, res: Response) => {
+app.post('/api/admin/payments/:id/status', async (req: Request, res: Response) => {
+  const user = await requireApiUser(req, res, 'giveSlots');
+  if (!user) return;
   const { id } = req.params;
   const { status } = req.body;
   if (!['pending', 'verified', 'rejected'].includes(status)) {
@@ -499,7 +927,9 @@ app.post('/api/admin/payments/:id/status', (req: Request, res: Response) => {
 });
 
 // Endpoint to get all support tickets for Admin Console
-app.get('/api/admin/support-tickets', (_req: Request, res: Response) => {
+app.get('/api/admin/support-tickets', async (req: Request, res: Response) => {
+  const user = await requireApiUser(req, res, ['answerComplaints', 'redirectSuggestions']);
+  if (!user) return;
   const list = loadSupportSubmissions();
   res.json({
     success: true,
@@ -508,10 +938,25 @@ app.get('/api/admin/support-tickets', (_req: Request, res: Response) => {
 });
 
 // Endpoint to handle bank transfer payment submission with user UID and send confirmation email notice
-app.post('/api/payment-submission', async (req: Request, res: Response) => {
+app.post('/api/payment-submission', rateLimit(5, 10 * 60_000), async (req: Request, res: Response) => {
   try {
     const { userId, userEmail, senderName, bankUsed, paymentRef, planDuration = 'biweekly', amount, receipt } = req.body;
+    const user = await requireApiUser(req, res);
+    if (!user) return;
 
+    if (user.uid !== userId || (userEmail && user.email !== String(userEmail).toLowerCase())) {
+      res.status(403).json({ error: 'Payment identity does not match the signed-in account.' });
+      return;
+    }
+    if (
+      typeof senderName !== 'string' || senderName.trim().length < 1 || senderName.length > 120 ||
+      typeof bankUsed !== 'string' || bankUsed.trim().length < 1 || bankUsed.length > 100 ||
+      (paymentRef !== undefined && (typeof paymentRef !== 'string' || paymentRef.length > 200)) ||
+      !['biweekly', 'monthly', 'yearly'].includes(planDuration)
+    ) {
+      res.status(400).json({ error: 'Payment details are invalid or too long.' });
+      return;
+    }
     if (!senderName || !bankUsed || !receipt?.name || !receipt?.data) {
       res.status(400).json({ error: 'Sender name, bank used, and a payment receipt are required.' });
       return;
@@ -543,7 +988,12 @@ app.post('/api/payment-submission', async (req: Request, res: Response) => {
       calculatedAmount = 15000;
     }
 
-    const finalAmount = Number(amount) || calculatedAmount;
+    const submittedAmount = Number(amount);
+    if (amount !== undefined && (!Number.isFinite(submittedAmount) || submittedAmount !== calculatedAmount)) {
+      res.status(400).json({ error: 'The submitted amount does not match the selected plan.' });
+      return;
+    }
+    const finalAmount = calculatedAmount;
     const formattedAmount = `₦${finalAmount.toLocaleString()} NGN`;
     const submittedAt = new Date().toUTCString();
     const paymentId = `pay-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
@@ -723,16 +1173,31 @@ Quantum-Resistant Isolated Storage`;
 });
 
 // Endpoint to receive suggestions and complaints sent to administrator email with user UID
-app.post('/api/send-support-ticket', async (req: Request, res: Response) => {
+app.post('/api/send-support-ticket', rateLimit(5, 10 * 60_000), async (req: Request, res: Response) => {
   try {
     const { userId, userEmail, userName, type, subject, message, priority, ticketId: requestedTicketId } = req.body;
+    const user = await requireApiUser(req, res);
+    if (!user) return;
 
-    if (!subject || !message) {
-      res.status(400).json({ error: 'Subject and message are required.' });
+    if (user.uid !== userId || (userEmail && user.email !== String(userEmail).toLowerCase())) {
+      res.status(403).json({ error: 'Support ticket identity does not match the signed-in account.' });
       return;
     }
 
-    const ticketId = requestedTicketId || `tkt-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+    if (
+      typeof subject !== 'string' || subject.trim().length < 1 || subject.length > 200 ||
+      typeof message !== 'string' || message.trim().length < 1 || message.length > 5000 ||
+      !['suggestion', 'complaint', 'inquiry', 'payment'].includes(type) ||
+      !['normal', 'high', 'urgent'].includes(priority || 'normal')
+    ) {
+      res.status(400).json({ error: 'Support ticket details are invalid or too long.' });
+      return;
+    }
+
+    const ticketId = typeof requestedTicketId === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(requestedTicketId)
+      ? requestedTicketId
+      : `tkt-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+    const verifiedEmail = user.email;
     const categoryLabel = (type || 'suggestion').toUpperCase();
     const emailSubject = `[Clockin Vault - ${categoryLabel}] ${subject} (UID: ${userId})`;
     const submittedAt = new Date().toUTCString();
@@ -743,7 +1208,7 @@ Clockin Vault Support & Feedback
 USER VERIFICATION METRICS:
 ------------------------------------------------------
 User UID:     ${userId}
-User Email:   ${userEmail || 'Anonymous'}
+User Email:   ${verifiedEmail || 'Anonymous'}
 User Name:    ${userName || 'Authenticated User'}
 Ticket ID:    ${ticketId}
 Category:     ${categoryLabel}
@@ -764,12 +1229,12 @@ search for User UID "${userId}" in the Admin Console.`;
     // 1. Dispatch email to Administrator
     const delivery = await dispatchEmailNotification({
       subject: emailSubject,
-      replyTo: userEmail || SUPPORT_EMAIL,
+      replyTo: verifiedEmail || SUPPORT_EMAIL,
       recipientEmail: SUPPORT_EMAIL,
       fields: {
         Ticket_Type: categoryLabel,
         User_UID: userId,
-        User_Email: userEmail || 'N/A',
+        User_Email: verifiedEmail || 'N/A',
         User_Name: userName || 'N/A',
         Subject: subject,
         Message: message,
@@ -783,7 +1248,7 @@ search for User UID "${userId}" in the Admin Console.`;
     const ticketRecord: StoredTicket = {
       id: ticketId,
       userId,
-      userEmail: userEmail || '',
+      userEmail: verifiedEmail || '',
       userName,
       type: type || 'suggestion',
       subject,

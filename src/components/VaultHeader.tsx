@@ -15,6 +15,7 @@ import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 import { LanguageSelector } from './LanguageSelector';
 import { isSuperAdminUser, isUserAdmin } from '../services/adminService';
+import { auth } from '../lib/firebase';
 import { db } from '../lib/firebase';
 import { VaultViewMode } from '../types/vault';
 
@@ -76,7 +77,10 @@ export const VaultHeader: React.FC<VaultHeaderProps> = ({
     if (!isAdmin) return;
     const checkPayments = async () => {
       try {
-        const res = await fetch('/api/admin/payments');
+        const token = await auth.currentUser?.getIdToken();
+        const res = await fetch('/api/admin/payments', {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
         if (res.ok) {
           const data = await res.json();
           const pending = (data.payments || []).filter((p: any) => p.status === 'pending').length;
@@ -93,7 +97,7 @@ export const VaultHeader: React.FC<VaultHeaderProps> = ({
 
   return (
     <header className="site-chrome vault-header-enter sticky top-0 z-30 bg-[#040e08]/90 backdrop-blur-xl border-b border-emerald-900/40 text-white shadow-xl shadow-black/10">
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div className="w-full px-4 sm:px-6 lg:px-8">
         {/* Main top bar */}
         <div className="h-16 flex items-center justify-between">
           {/* Brand: Vault X with Bespoke Logo */}
@@ -113,7 +117,7 @@ export const VaultHeader: React.FC<VaultHeaderProps> = ({
                 <span className="font-extrabold text-lg sm:text-xl tracking-tight text-white group-hover:text-emerald-300 transition-colors font-mono">
                   VAULT<span className="text-emerald-400">-X</span>
                 </span>
-                <span className="text-[10px] font-mono tracking-wider uppercase px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/35 flex items-center gap-1">
+                <span className="hidden sm:flex text-[10px] font-mono tracking-wider uppercase px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/35 items-center gap-1">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping"></span>
                   {t('zero_trust', 'ZERO-TRUST')}
                 </span>

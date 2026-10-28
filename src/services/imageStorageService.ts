@@ -49,48 +49,10 @@ export function formatBytes(bytes?: number): string {
   return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
 }
 
-// Fallback IndexedDB helper in case Firebase Storage bucket is restricted or offline
-const IDB_NAME = 'ClockinVaultImageStore';
-const IDB_STORE = 'vault_images';
-
-function openImageDB(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(IDB_NAME, 1);
-    request.onupgradeneeded = () => {
-      const db = request.result;
-      if (!db.objectStoreNames.contains(IDB_STORE)) {
-        db.createObjectStore(IDB_STORE, { keyPath: 'id' });
-      }
-    };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
-}
-
-export async function storeImageInLocalVault(id: string, file: File): Promise<string> {
-  try {
-    const db = await openImageDB();
-    const reader = new FileReader();
-    return new Promise((resolve, reject) => {
-      reader.onload = () => {
-        const dataUrl = reader.result as string;
-        const tx = db.transaction(IDB_STORE, 'readwrite');
-        tx.objectStore(IDB_STORE).put({ id, dataUrl, name: file.name, size: file.size });
-        tx.oncomplete = () => resolve(dataUrl);
-        tx.onerror = () => reject(tx.error);
-      };
-      reader.onerror = () => reject(reader.error);
-      reader.readAsDataURL(file);
-    });
-  } catch (err) {
-    // Last fallback: Object URL
-    return URL.createObjectURL(file);
-  }
-}
-
 /**
- * Uploads an image up to 200MB to Firebase Storage with progress tracking,
- * with local fallback support.
+ * Uploads an image up to 200MB to Firebase Storage with progress tracking.
+ * It fails closed if Firebase Storage is unavailable instead of copying the
+ * sensitive file into unencrypted browser storage.
  */
 export async function uploadVaultImage(
   userId: string,
@@ -141,13 +103,7 @@ export async function uploadVaultImage(
       type: file.type || 'image/jpeg',
     };
   } catch (storageError) {
-    console.warn('Falling back to local encrypted vault image store for item:', itemId);
-    const localUrl = await storeImageInLocalVault(`${userId}_${itemId}`, file);
-    return {
-      url: localUrl,
-      name: file.name,
-      size: file.size,
-      type: file.type || 'image/jpeg',
-    };
+    console.error('Secure Firebase Storage upload failed:', storageError);
+    throw new Error('Secure file upload failed. Please try again when Firebase Storage is available.');
   }
 }

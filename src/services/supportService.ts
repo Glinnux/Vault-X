@@ -9,10 +9,15 @@ import {
   onSnapshot,
   serverTimestamp,
 } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { auth, db } from '../lib/firebase';
 import { SupportTicket, PaymentSubmissionLog } from '../types/vault';
 
 export const ADMIN_SUPPORT_EMAIL = 'oluwolefaith92@gmail.com';
+
+async function getServerAuthHeaders(): Promise<Record<string, string>> {
+  const token = await auth.currentUser?.getIdToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
 
 /**
  * Submit user suggestion or complaint to admin email and Firestore
@@ -90,7 +95,7 @@ Please inspect this user's account using the Verification UID: ${data.userId}`;
   try {
     const res = await fetch('/api/send-support-ticket', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...(await getServerAuthHeaders()) },
       body: JSON.stringify({
         ...data,
         ticketId,
@@ -147,7 +152,9 @@ export interface ServerPaymentRecord {
  */
 export async function fetchServerPayments(): Promise<ServerPaymentRecord[]> {
   try {
-    const res = await fetch('/api/admin/payments');
+    const res = await fetch('/api/admin/payments', {
+      headers: await getServerAuthHeaders(),
+    });
     if (res.ok) {
       const data = await res.json();
       return data.payments || [];
@@ -168,7 +175,7 @@ export async function updateServerPaymentStatus(
   try {
     const res = await fetch(`/api/admin/payments/${paymentId}/status`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...(await getServerAuthHeaders()) },
       body: JSON.stringify({ status }),
     });
     return res.ok;
@@ -240,7 +247,7 @@ User UID for Verification: ${data.userId}`,
   try {
     const res = await fetch('/api/payment-submission', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...(await getServerAuthHeaders()) },
       body: JSON.stringify({
         userId: data.userId,
         userEmail: data.userEmail,

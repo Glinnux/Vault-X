@@ -25,6 +25,8 @@ import {
 } from '../services/supportService';
 import { SupportTicket } from '../types/vault';
 
+const GMAIL_HELP_URL = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(ADMIN_SUPPORT_EMAIL)}&su=${encodeURIComponent('Vault X Help Request')}`;
+
 interface SupportPageProps {
   onBackToVault: () => void;
   onToast: (msg: string, type?: 'success' | 'info' | 'error') => void;
@@ -162,7 +164,7 @@ Thank you.`;
 
         <div className="flex items-center space-x-2 text-xs font-mono text-slate-400">
           <span className="hidden sm:inline">Admin Destination:</span>
-          <span className="text-cyan-300 font-semibold">{ADMIN_SUPPORT_EMAIL}</span>
+          <a href={GMAIL_HELP_URL} target="_blank" rel="noopener noreferrer" className="text-cyan-300 font-semibold hover:underline">Help</a>
         </div>
       </div>
 
@@ -181,7 +183,7 @@ Thank you.`;
             </h1>
             <p className="text-sm text-slate-300 mt-2 max-w-xl leading-relaxed">
               Have a suggestion to enhance Vault X, a complaint, or a payment confirmation inquiry? Submit directly to the vault administrator at{' '}
-              <span className="text-cyan-300 font-mono font-medium">{ADMIN_SUPPORT_EMAIL}</span>. Every submission is digitally certified with your unique User UID.
+              <a href={GMAIL_HELP_URL} target="_blank" rel="noopener noreferrer" className="text-cyan-300 font-mono font-medium hover:underline">Help</a>. Every submission is digitally certified with your unique User UID.
             </p>
           </div>
 
@@ -397,7 +399,7 @@ Thank you.`;
                     Automatic UID Verification Stamped
                   </span>
                   <span className="text-[11px] text-slate-400">
-                    Destination: <strong className="text-cyan-300">{ADMIN_SUPPORT_EMAIL}</strong> &bull; Sender UID:{' '}
+                    Destination: <a href={GMAIL_HELP_URL} target="_blank" rel="noopener noreferrer" className="text-cyan-300 hover:underline"><strong>Help</strong></a> &bull; Sender UID:{' '}
                     <strong className="text-white">{userUid}</strong>
                   </span>
                 </div>
@@ -459,7 +461,7 @@ Thank you.`;
                 All communications sent through this form reach the administrator mailbox directly:
               </p>
               <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800 font-mono text-xs text-cyan-300 break-all select-all">
-                {ADMIN_SUPPORT_EMAIL}
+                <a href={GMAIL_HELP_URL} target="_blank" rel="noopener noreferrer" className="hover:underline">Help</a>
               </div>
               <p className="text-[11px] text-slate-500">
                 Always include your <strong>User UID</strong> when messaging from outside the app for swift verification.
@@ -563,7 +565,7 @@ Thank you.`;
                   </p>
 
                   <div className="flex items-center justify-between text-[10px] font-mono text-slate-500 pt-1">
-                    <span>Transmitted to: {ADMIN_SUPPORT_EMAIL}</span>
+                    <span>Transmitted to: <a href={GMAIL_HELP_URL} target="_blank" rel="noopener noreferrer" className="hover:underline">Help</a></span>
                     <span>UID: {t.userId}</span>
                   </div>
                 </div>
@@ -587,7 +589,7 @@ Thank you.`;
               </h3>
               <p className="text-xs text-slate-400 mt-1">
                 Your {submittedReceipt.type} has been dispatched to{' '}
-                <strong className="text-cyan-300 font-mono">{ADMIN_SUPPORT_EMAIL}</strong>.
+                <a href={GMAIL_HELP_URL} target="_blank" rel="noopener noreferrer" className="text-cyan-300 font-mono hover:underline"><strong>Help</strong></a>.
               </p>
             </div>
 
@@ -606,7 +608,7 @@ Thank you.`;
               </div>
               <div className="flex justify-between items-center text-slate-400">
                 <span>Notice Sent To:</span>
-                <span className="text-white">{ADMIN_SUPPORT_EMAIL}</span>
+                <a href={GMAIL_HELP_URL} target="_blank" rel="noopener noreferrer" className="text-white hover:underline">Help</a>
               </div>
             </div>
 

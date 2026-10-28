@@ -20,6 +20,7 @@ import {
   Info,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { auth } from '../lib/firebase';
 
 interface ChatMessage {
   id: string;
@@ -34,9 +35,17 @@ interface VaultChatbotProps {
   onOpenSecurity?: () => void;
   isOpenExternal?: boolean;
   onToggleOpen?: (open: boolean) => void;
+  vaultSummary?: {
+    total: number;
+    credentials: number;
+    documents: number;
+    favorites: number;
+    categories: string[];
+  };
 }
 
 const DEFAULT_SUPPORT_EMAIL = 'oluwolefaith92@gmail.com';
+const SUPPORT_EMAIL_LABEL = 'Help';
 
 const QUICK_PROMPTS = [
   {
@@ -71,6 +80,7 @@ export const VaultChatbot: React.FC<VaultChatbotProps> = ({
   onOpenSecurity,
   isOpenExternal,
   onToggleOpen,
+  vaultSummary,
 }) => {
   const { user } = useAuth();
   const [internalOpen, setInternalOpen] = useState(false);
@@ -92,7 +102,7 @@ export const VaultChatbot: React.FC<VaultChatbotProps> = ({
     {
       id: 'welcome',
       role: 'assistant',
-      text: `Hello! I am your **CyberVault Storage Guide**. I can guide you on how to securely store passwords, confidential documents, and organize your vault items.\n\n*Notice: For any abstract inquiries or complaints, please reach out directly to the administrator at **${DEFAULT_SUPPORT_EMAIL}**.*`,
+      text: `Hello! I am your **CyberVault Storage Guide**. I can guide you on how to securely store passwords, confidential documents, and organize your vault items.\n\n*Notice: For any abstract inquiries or complaints, please reach out directly through the **${SUPPORT_EMAIL_LABEL}**.*`,
       timestamp: new Date(),
     },
   ]);
@@ -133,6 +143,8 @@ export const VaultChatbot: React.FC<VaultChatbotProps> = ({
     setTimeout(() => setCopiedEmail(false), 2000);
   };
 
+  const gmailHelpUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(supportEmail)}&su=${encodeURIComponent('Vault X Help Request')}`;
+
   const handleSendMessage = async (userPromptText?: string) => {
     const textToSend = (userPromptText || inputMessage).trim();
     if (!textToSend || isLoading) return;
@@ -150,6 +162,21 @@ export const VaultChatbot: React.FC<VaultChatbotProps> = ({
     }
     setIsLoading(true);
 
+    // Greetings should be instant and should never trigger the long AI request.
+    if (/^(hi|hello|hey|good morning|good afternoon|good evening)[!?,.\s]*$/i.test(textToSend)) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `assistant-${Date.now()}`,
+          role: 'assistant',
+          text: 'Hello! How can I help you use Vault X today?',
+          timestamp: new Date(),
+        },
+      ]);
+      setIsLoading(false);
+      return;
+    }
+
     try {
       // Build history payload
       const history = messages.slice(-6).map((m) => ({
@@ -157,14 +184,18 @@ export const VaultChatbot: React.FC<VaultChatbotProps> = ({
         text: m.text,
       }));
 
+      const idToken = await auth.currentUser?.getIdToken();
+
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...(idToken ? { Authorization: `Bearer ${idToken}` } : {}),
         },
         body: JSON.stringify({
           message: textToSend,
           history,
+          vaultSummary,
         }),
       });
 
@@ -175,6 +206,9 @@ export const VaultChatbot: React.FC<VaultChatbotProps> = ({
       const data = await res.json();
       const replyText = data.reply || 'Guidance received.';
       const activeEmail = data.supportEmail || supportEmail;
+      const displayReplyText = activeEmail
+        ? replyText.split(activeEmail).join(SUPPORT_EMAIL_LABEL)
+        : replyText;
       if (data.supportEmail) {
         setSupportEmail(data.supportEmail);
       }
@@ -182,7 +216,7 @@ export const VaultChatbot: React.FC<VaultChatbotProps> = ({
       const assistantMessage: ChatMessage = {
         id: `assistant-${Date.now()}`,
         role: 'assistant',
-        text: replyText,
+        text: displayReplyText,
         timestamp: new Date(),
         isEmailNotice:
           replyText.includes(activeEmail) ||
@@ -199,7 +233,7 @@ export const VaultChatbot: React.FC<VaultChatbotProps> = ({
         {
           id: `assistant-${Date.now()}`,
           role: 'assistant',
-          text: `I encountered a network issue communicating with the server.\n\nFor any abstract questions, assistance, or complaints, please contact the administrator directly at **${supportEmail}**.`,
+          text: `I encountered a network issue communicating with the server.\n\nFor any abstract questions, assistance, or complaints, please contact the administrator through the **${SUPPORT_EMAIL_LABEL}**.`,
           timestamp: new Date(),
           isEmailNotice: true,
         },
@@ -221,7 +255,7 @@ export const VaultChatbot: React.FC<VaultChatbotProps> = ({
       {
         id: `reset-${Date.now()}`,
         role: 'assistant',
-        text: `Chat reset. How can I guide you with your vault information storage today?\n\n*Reminder: Any abstract inquiries or complaints should be sent directly to **${supportEmail}**.*`,
+        text: `Chat reset. How can I guide you with your vault information storage today?\n\n*Reminder: Any abstract inquiries or complaints should be sent through the **${SUPPORT_EMAIL_LABEL}**.*`,
         timestamp: new Date(),
       },
     ]);
@@ -316,7 +350,7 @@ export const VaultChatbot: React.FC<VaultChatbotProps> = ({
                 <Mail className="w-3 h-3 text-cyan-400 shrink-0" />
                 <span className="truncate">
                   Complaints / Abstract inquiries:{' '}
-                  <span className="text-cyan-300 font-medium">{supportEmail}</span>
+                  <a href={gmailHelpUrl} target="_blank" rel="noopener noreferrer" className="text-cyan-300 font-medium hover:underline">{SUPPORT_EMAIL_LABEL}</a>
                 </span>
               </div>
               <button
@@ -359,17 +393,20 @@ export const VaultChatbot: React.FC<VaultChatbotProps> = ({
                       {msg.text.split('\n').map((line, idx) => {
                         if (!line.trim()) return <div key={idx} className="h-1.5" />;
 
-                        // Render markdown-like bold text
-                        const formatted = line.replace(
-                          /\*\*(.*?)\*\*/g,
-                          '<strong class="text-white font-semibold">$1</strong>'
-                        );
-
                         return (
                           <p
                             key={idx}
-                            dangerouslySetInnerHTML={{ __html: formatted }}
-                          />
+                          >
+                            {line.split(/\*\*(.*?)\*\*/g).map((part, partIndex) =>
+                              partIndex % 2 === 1 ? (
+                                <strong key={partIndex} className="text-white font-semibold">
+                                  {part}
+                                </strong>
+                              ) : (
+                                <React.Fragment key={partIndex}>{part}</React.Fragment>
+                              )
+                            )}
+                          </p>
                         );
                       })}
                     </div>
@@ -385,11 +422,13 @@ export const VaultChatbot: React.FC<VaultChatbotProps> = ({
 
                           <div className="flex flex-wrap gap-1.5">
                             <a
-                              href={`mailto:${supportEmail}?subject=CyberVault%20Inquiry%20/%20Complaint&body=Hello%20Administrator,%0D%0A%0D%0AI%20am%20reaching%20out%20regarding%20Clockin%20Vault:%0D%0A`}
+                              href={gmailHelpUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
                               className="inline-flex items-center space-x-1.5 bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-200 border border-cyan-500/40 px-2.5 py-1 rounded-lg text-[11px] font-medium transition-colors cursor-pointer"
                             >
                               <Mail className="w-3 h-3" />
-                              <span>Email {supportEmail}</span>
+                              <span>Email {SUPPORT_EMAIL_LABEL}</span>
                               <ExternalLink className="w-2.5 h-2.5 opacity-60" />
                             </a>
 

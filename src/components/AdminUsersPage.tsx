@@ -38,6 +38,7 @@ import {
   X,
   AlertCircle,
   ChevronRight,
+  KeyRound,
 } from 'lucide-react';
 import {
   UserAccount,
@@ -83,6 +84,7 @@ import {
   ServerPaymentRecord,
 } from '../services/supportService';
 import { useAuth } from '../context/AuthContext';
+import { decideRecoveryRequest, fetchRecoveryRequests, RecoveryRequest } from '../services/recoveryService';
 
 interface AdminUsersPageProps {
   onBackToVault: () => void;
@@ -97,7 +99,7 @@ export const AdminUsersPage: React.FC<AdminUsersPageProps> = ({
 
   // Primary Navigation Tabs: Redesigned into separate, non-confusing distinct tabs
   const [activeTab, setActiveTab] = useState<
-    'payments' | 'suggestions' | 'complaints' | 'feedback' | 'admins' | 'users' | 'resolved'
+    'payments' | 'suggestions' | 'complaints' | 'feedback' | 'admins' | 'users' | 'resolved' | 'recovery'
   >('payments');
 
   // Bank Transfer Sub-tabs: 'notifications' (pending queue) vs 'resolved' (verified audit archive)
@@ -112,6 +114,7 @@ export const AdminUsersPage: React.FC<AdminUsersPageProps> = ({
   const [serverPayments, setServerPayments] = useState<ServerPaymentRecord[]>([]);
   const [adminsList, setAdminsList] = useState<AdminRecord[]>([]);
   const [adminsListLoaded, setAdminsListLoaded] = useState(false);
+  const [recoveryRequests, setRecoveryRequests] = useState<RecoveryRequest[]>([]);
 
   // Loading States
   const [loadingUsers, setLoadingUsers] = useState(true);
@@ -183,6 +186,7 @@ export const AdminUsersPage: React.FC<AdminUsersPageProps> = ({
       { id: 'feedback' as const, label: 'Feedback & Inquiries', allowed: canViewTickets },
       { id: 'resolved' as const, label: 'Resolved', allowed: canViewResolved },
       { id: 'admins' as const, label: 'Appoint & Manage Admins', allowed: isSuperAdmin || currentAdminPerms.addAdmins },
+      { id: 'recovery' as const, label: 'Issues & Requests', allowed: isSuperAdmin || currentAdminPerms.addAdmins || currentAdminPerms.answerComplaints },
       { id: 'users' as const, label: 'Registered Accounts', allowed: canViewUsers },
     ].filter((tab) => tab.allowed);
   }, [isSuperAdmin, currentAdminPerms]);
@@ -220,6 +224,23 @@ export const AdminUsersPage: React.FC<AdminUsersPageProps> = ({
     );
     return () => unsubscribe();
   }, [isSuperAdmin, isAppointedAdmin, currentAdminPerms]);
+
+  useEffect(() => {
+    if (!(isSuperAdmin || currentAdminPerms.addAdmins || currentAdminPerms.answerComplaints)) {
+      setRecoveryRequests([]);
+      return;
+    }
+    const loadRecoveryRequests = async () => {
+      try {
+        setRecoveryRequests(await fetchRecoveryRequests());
+      } catch (error) {
+        console.warn('Recovery requests could not be loaded:', error);
+      }
+    };
+    loadRecoveryRequests();
+    const interval = setInterval(loadRecoveryRequests, 15000);
+    return () => clearInterval(interval);
+  }, [isSuperAdmin, currentAdminPerms.addAdmins, currentAdminPerms.answerComplaints]);
 
   // 2. Subscribe to support tickets
   useEffect(() => {
@@ -848,6 +869,7 @@ export const AdminUsersPage: React.FC<AdminUsersPageProps> = ({
             resolved: CheckCheck,
             admins: ShieldCheck,
             users: Users,
+            recovery: KeyRound,
           }[tab.id];
           return (
             <button
@@ -895,6 +917,8 @@ export const AdminUsersPage: React.FC<AdminUsersPageProps> = ({
               ? 'Search feedback & inquiries by user message or UID...'
               : activeTab === 'admins'
               ? 'Search administrators by email, name, or UID...'
+              : activeTab === 'recovery'
+              ? 'Search recovery requests by UID or email...'
               : activeTab === 'resolved'
               ? 'Search resolved issues and verified payments...'
               : 'Search registered accounts by UID, email, or display name...'
@@ -904,6 +928,64 @@ export const AdminUsersPage: React.FC<AdminUsersPageProps> = ({
       </div>
 
       {/* ============================================================== */}
+      {activeTab === 'recovery' && (
+        <section className="space-y-5">
+          <div>
+            <h3 className="text-lg font-bold text-white flex items-center gap-2">
+              <KeyRound className="w-5 h-5 text-amber-300" />
+              Issues & Requests
+            </h3>
+            <p className="text-xs text-slate-400 mt-1">Review account recovery submissions and approve or reject verified email-change requests.</p>
+          </div>
+          {recoveryRequests.filter((request) => {
+            const term = search.trim().toLowerCase();
+            return !term || `${request.uid} ${request.currentEmail} ${request.proposedEmail}`.toLowerCase().includes(term);
+          }).length === 0 ? (
+            <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-6 text-sm text-slate-400">No pending recovery requests.</div>
+          ) : (
+            recoveryRequests
+              .filter((request) => {
+                const term = search.trim().toLowerCase();
+                return !term || `${request.uid} ${request.currentEmail} ${request.proposedEmail}`.toLowerCase().includes(term);
+              })
+              .map((request) => (
+                <article key={request.id} className="rounded-xl border border-amber-500/30 bg-amber-950/15 p-4 text-xs">
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <div><span className="text-slate-500">User UID</span><div className="font-mono text-cyan-300 break-all">{request.uid}</div></div>
+                    <div><span className="text-slate-500">Requested email</span><div className="text-white break-all">{request.proposedEmail}</div></div>
+                    <div><span className="text-slate-500">Current email</span><div className="text-slate-300 break-all">{request.currentEmail}</div></div>
+                    <div><span className="text-slate-500">Requested at</span><div className="text-slate-300">{request.requestedAt ? new Date(request.requestedAt).toLocaleString() : 'Unknown'}</div></div>
+                  </div>
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          const message = await decideRecoveryRequest(request.id, true);
+                          setRecoveryRequests((items) => items.filter((item) => item.id !== request.id));
+                          onToast(message, 'success');
+                        } catch (error: any) { onToast(error?.message || 'Approval failed.', 'error'); }
+                      }}
+                      className="rounded-lg bg-emerald-600 px-3 py-2 font-semibold text-white hover:bg-emerald-500"
+                    >Approve email change</button>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          const message = await decideRecoveryRequest(request.id, false);
+                          setRecoveryRequests((items) => items.filter((item) => item.id !== request.id));
+                          onToast(message, 'info');
+                        } catch (error: any) { onToast(error?.message || 'Rejection failed.', 'error'); }
+                      }}
+                      className="rounded-lg border border-rose-500/40 px-3 py-2 font-semibold text-rose-200 hover:bg-rose-950/50"
+                    >Reject</button>
+                  </div>
+                </article>
+              ))
+          )}
+        </section>
+      )}
+
       {activeTab === 'resolved' && (
         <section className="space-y-5">
           <div>

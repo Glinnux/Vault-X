@@ -59,6 +59,8 @@ function VaultApp() {
     clearAuthError,
     openAuthModal,
     signOut,
+    recoveryNotice,
+    clearRecoveryNotice,
   } = useAuth();
   const { t, isAutoMode, currentLangInfo } = useLanguage();
   const { isMobileDevice } = useDeviceDetection();
@@ -740,17 +742,24 @@ function VaultApp() {
         onSave={handleUpdateItem}
       />
 
-      {/* AI Storage Guide Chatbot - Only available when signed in */}
-      {user && isMobileDevice && (
+      {/* AI Storage Guide Chatbot - Available to signed-in users on every device */}
+      {user && (
         <VaultChatbot
           isOpenExternal={isChatbotOpen}
           onToggleOpen={(open) => setIsChatbotOpen(open)}
           onOpenAddItem={() => setIsAddModalOpen(true)}
+          vaultSummary={{
+            total: items.length,
+            credentials: items.filter((item) => item.type === 'credential').length,
+            documents: items.filter((item) => item.type === 'document').length,
+            favorites: items.filter((item) => item.favorite).length,
+            categories: Array.from(new Set(items.map((item) => item.category))),
+          }}
         />
       )}
 
       {/* Android Adaptive Bottom Navigation Bar (Mobile Thumb-Friendly) */}
-      {user && (
+      {user && isMobileDevice && (
         <AndroidBottomNav
           currentView={viewMode}
           onSelectView={(mode) => setViewMode(mode)}
@@ -762,6 +771,31 @@ function VaultApp() {
 
       {/* Authentication Modal (Google, Email/Password) */}
       <AuthModal />
+
+      {recoveryNotice && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-4 backdrop-blur-md">
+          <div className="w-full max-w-md rounded-2xl border border-amber-400/40 bg-[#07130f] p-6 text-white shadow-2xl">
+            <div className="flex items-center gap-2 text-amber-300 font-mono font-bold">
+              <KeyRound className="h-5 w-5" />
+              Save your Vault X recovery code
+            </div>
+            <p className="mt-3 text-sm text-slate-300">
+              This one-time code helps you request an email change if you lose access to your sign-in email. Store it somewhere private. Vault X will not show it again.
+            </p>
+            <div className="my-5 rounded-xl border border-amber-400/40 bg-black/50 py-4 text-center text-2xl font-mono font-bold tracking-[0.35em] text-amber-200">
+              {recoveryNotice.code}
+            </div>
+            <p className="text-[11px] text-slate-400">Expires in 15 minutes. Admin approval is required before an email change is applied.</p>
+            <button
+              type="button"
+              onClick={clearRecoveryNotice}
+              className="mt-5 w-full rounded-xl bg-amber-500 px-4 py-2.5 text-sm font-bold text-slate-950 hover:bg-amber-400"
+            >
+              I saved my code
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Toast Notification */}
       {toast && (

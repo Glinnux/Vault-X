@@ -1,0 +1,14 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /users/{userId}/vault/{fileName} {
+      allow read: if request.auth != null && request.auth.uid == userId;
+      allow write: if request.auth != null &&
+        request.auth.uid == userId &&
+        request.resource.size <= 209715200 &&
+        request.resource.contentType.matches('image/.*|application/pdf|text/.*|application/(msword|vnd.openxmlformats-officedocument.*)|application/json');
+      allow delete: if request.auth != null && request.auth.uid == userId;
+    }
+  }
+}

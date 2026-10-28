@@ -719,10 +719,12 @@ export const PaymentPage: React.FC<PaymentPageProps> = ({
             <div className="pt-2 border-t border-slate-800/60 text-[11px]">
               Need payment assistance or have questions? Email us directly at{' '}
               <a
-                href="mailto:oluwolefaith92@gmail.com"
+                href={`https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(ADMIN_SUPPORT_EMAIL)}&su=${encodeURIComponent('Vault X Help Request')}`}
                 className="text-cyan-400 hover:underline font-mono"
+                target="_blank"
+                rel="noopener noreferrer"
               >
-                oluwolefaith92@gmail.com
+                Help
               </a>
             </div>
           </div>
@@ -798,7 +800,7 @@ export const PaymentPage: React.FC<PaymentPageProps> = ({
             <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3 text-[11px] font-mono text-slate-300 space-y-1.5">
               <div className="flex items-center justify-between text-[10px] text-slate-400">
                 <span>ADMIN NOTIFICATION GATEWAY:</span>
-                <span className="text-cyan-300 font-bold">oluwolefaith92@gmail.com</span>
+                <span className="text-cyan-300 font-bold">Help</span>
               </div>
               <p className="text-[10px] text-slate-400 leading-relaxed font-sans">
                 {emailNoticeModal.emailDelivery?.sent

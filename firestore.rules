@@ -66,6 +66,17 @@ service cloud.firestore {
         hasAdminPermission('addAdmins');
     }
 
+    function isSafeSelfProfileCreate(data) {
+      return data.keys().hasOnly([
+          'userId', 'email', 'displayName', 'photoURL', 'role', 'plan',
+          'extraSlots', 'maxCredentialSlots', 'createdAt', 'updatedAt'
+        ]) &&
+        data.role == 'user' &&
+        data.plan == 'free' &&
+        data.extraSlots == 0 &&
+        data.maxCredentialSlots == 10;
+    }
+
     // 3. UserProfile Entity Validator
     function isValidUserProfile(data) {
       return data.keys().hasAll(['userId', 'email', 'createdAt', 'updatedAt']) &&
@@ -94,6 +105,29 @@ service cloud.firestore {
         data.updatedAt is timestamp;
     }
 
+    function isValidVaultItem(data) {
+      return data.keys().hasAll(['userId', 'type', 'title', 'category', 'favorite', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly([
+          'userId', 'type', 'title', 'service', 'username', 'password', 'url', 'category',
+          'notes', 'imageUrl', 'imageName', 'imageSize', 'imageType', 'favorite', 'createdAt', 'updatedAt'
+        ]) &&
+        data.userId is string && data.userId == request.auth.uid &&
+        data.type in ['credential', 'document'] &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 200 &&
+        data.category in ['social', 'work', 'personal', 'finance', 'document', 'other'] &&
+        data.favorite is bool &&
+        data.createdAt is timestamp && data.updatedAt is timestamp &&
+        (!('service' in data.keys()) || (data.service is string && data.service.size() <= 100)) &&
+        (!('username' in data.keys()) || (data.username is string && data.username.size() <= 320)) &&
+        (!('password' in data.keys()) || (data.password is string && data.password.size() <= 500)) &&
+        (!('url' in data.keys()) || (data.url is string && data.url.size() <= 1024)) &&
+        (!('notes' in data.keys()) || (data.notes is string && data.notes.size() <= 5000)) &&
+        (!('imageUrl' in data.keys()) || (data.imageUrl is string && data.imageUrl.size() <= 2048)) &&
+        (!('imageName' in data.keys()) || (data.imageName is string && data.imageName.size() <= 255)) &&
+        (!('imageSize' in data.keys()) || (data.imageSize is number && data.imageSize >= 0 && data.imageSize <= 209715200)) &&
+        (!('imageType' in data.keys()) || (data.imageType is string && data.imageType.size() <= 100));
+    }
+
     // 4. SupportTicket Entity Validator
     function isValidSupportTicket(data) {
       return data.keys().hasAll(['userId', 'userEmail', 'type', 'subject', 'message', 'createdAt']) &&
@@ -117,15 +151,18 @@ service cloud.firestore {
       allow get: if (isOwner(userId) || canViewUserDirectory()) && isValidId(userId);
       allow create: if isOwner(userId) && isValidId(userId) &&
         isValidUserProfile(incoming()) &&
+        (isAdmin() || isSafeSelfProfileCreate(incoming())) &&
         incoming().createdAt == request.time &&
         incoming().updatedAt == request.time;
-      allow update: if (isOwner(userId) || isAdmin()) && isValidId(userId) &&
+      allow update: if isValidId(userId) &&
         isValidUserProfile(incoming()) &&
         incoming().userId == existing().userId &&
         incoming().createdAt == existing().createdAt &&
         incoming().updatedAt == request.time &&
         (
-          isOwner(userId) ||
+          (isOwner(userId) && incoming().diff(existing()).affectedKeys().hasOnly([
+            'displayName', 'photoURL', 'updatedAt'
+          ])) ||
           isSuperAdmin() ||
           (hasAdminPermission('giveSlots') && incoming().diff(existing()).affectedKeys().hasOnly([
             'plan', 'planDuration', 'extraSlots', 'maxCredentialSlots', 'paymentStatus',
@@ -143,10 +180,11 @@ service cloud.firestore {
       match /vault/{itemId} {
         allow get, delete: if isOwner(userId) && !isAccountBanned(userId) && isValidId(userId) && isValidId(itemId);
         allow list: if isOwner(userId) && !isAccountBanned(userId);
-        allow create, update: if isOwner(userId) && !isAccountBanned(userId) && isValidId(userId) && isValidId(itemId) &&
-          incoming().userId == request.auth.uid &&
-          incoming().createdAt is timestamp &&
-          incoming().updatedAt == request.time;
+        allow create: if isOwner(userId) && !isAccountBanned(userId) && isValidId(userId) && isValidId(itemId) &&
+          isValidVaultItem(incoming()) && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+        allow update: if isOwner(userId) && !isAccountBanned(userId) && isValidId(userId) && isValidId(itemId) &&
+          isValidVaultItem(incoming()) && incoming().userId == existing().userId &&
+          incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time;
       }
     }
 
@@ -171,7 +209,11 @@ service cloud.firestore {
 
     // 8. Administrators Collection
     match /admins/{adminId} {
-      allow read: if isSignedIn();
+      allow read: if isSignedIn() && (
+        request.auth.uid == adminId ||
+        isSuperAdmin() ||
+        hasAdminPermission('addAdmins')
+      );
       allow create, update, delete: if hasAdminPermission('addAdmins');
     }
   }
