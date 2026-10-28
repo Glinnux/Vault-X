@@ -1,5 +1,7 @@
 import { auth } from '../lib/firebase';
 
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
+
 export interface AdminChatRecord {
   id: string;
   type: 'group' | 'dm';
@@ -31,7 +33,7 @@ export interface AdminChatDirectoryEntry {
 
 async function request(path: string, init?: RequestInit) {
   const token = await auth.currentUser?.getIdToken();
-  const response = await fetch(path, {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
     headers: {
       ...(init?.headers || {}),

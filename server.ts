@@ -21,6 +21,12 @@ const app = express();
 app.disable('x-powered-by');
 const PORT = Number(process.env.PORT) || 3000;
 const SUPPORT_EMAIL = 'oluwolefaith92@gmail.com';
+const allowedOrigins = new Set(
+  (process.env.APP_ORIGINS || 'https://glinnux.github.io,http://localhost:3000')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean)
+);
 const SUPABASE_URL = process.env.SUPABASE_URL || '';
 const SUPABASE_SECRET_KEY = process.env.SUPABASE_SECRET_KEY || '';
 const SUPABASE_BUCKET = process.env.SUPABASE_BUCKET || 'vault-files';
@@ -64,6 +70,24 @@ app.use((_req, res, next) => {
   }
   if (process.env.NODE_ENV === 'production') {
     res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  }
+  next();
+});
+
+// The GitHub Pages frontend and Render API are different origins. Admin chat
+// uses Firebase ID tokens in the Authorization header, so CORS can remain
+// credential-free while still allowing the authenticated API calls.
+app.use((req, res, next) => {
+  const origin = req.header('origin');
+  if (origin && allowedOrigins.has(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  }
+  if (req.method === 'OPTIONS') {
+    res.sendStatus(origin && allowedOrigins.has(origin) ? 204 : 403);
+    return;
   }
   next();
 });
