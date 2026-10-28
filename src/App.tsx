@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   Shield,
   KeyRound,
@@ -120,12 +120,12 @@ function VaultApp() {
     };
   }, [user]);
 
-  const showToast = (message: string, type: 'success' | 'info' | 'error' = 'success') => {
+  const showToast = useCallback((message: string, type: 'success' | 'info' | 'error' = 'success') => {
     setToast({ message, type });
     setTimeout(() => {
       setToast((current) => (current?.message === message ? null : current));
     }, 3000);
-  };
+  }, []);
 
   // Subscription & Slot state (10 slots on free plan, +20 on paid, unlimited for admin)
   const [subscription, setSubscription] = useState<UserSubscription>(() => {
@@ -452,7 +452,7 @@ function VaultApp() {
               admins={[]}
               currentUser={user}
               isSuperAdmin={isSuperAdminUser(user?.email)}
-              onToast={(msg, type) => showToast(msg, type)}
+              onToast={showToast}
               onBackToConsole={() => setViewMode('admin')}
             />
           ) : (
