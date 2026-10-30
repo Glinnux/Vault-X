@@ -35,6 +35,7 @@ export const EditVaultItemModal: React.FC<EditVaultItemModalProps> = ({
   const [imageName, setImageName] = useState<string | undefined>(undefined);
   const [imageSize, setImageSize] = useState<number | undefined>(undefined);
   const [imageType, setImageType] = useState<string | undefined>(undefined);
+  const [imageIv, setImageIv] = useState<string | undefined>(undefined);
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [uploadProgress, setUploadProgress] = useState<number>(0);
 
@@ -54,11 +55,12 @@ export const EditVaultItemModal: React.FC<EditVaultItemModalProps> = ({
       setImageUrl(item.imageUrl);
       setPreviewImageUrl(item.imageUrl);
       if (item.imageUrl?.startsWith('supabase://')) {
-        resolveVaultFileUrl(item.imageUrl).then((url) => setPreviewImageUrl(url)).catch(() => setPreviewImageUrl(undefined));
+        resolveVaultFileUrl(item.imageUrl, item.imageIv, item.imageType).then((url) => setPreviewImageUrl(url)).catch(() => setPreviewImageUrl(undefined));
       }
       setImageName(item.imageName);
       setImageSize(item.imageSize);
       setImageType(item.imageType);
+      setImageIv(item.imageIv);
       setImageFile(null);
       setFavorite(Boolean(item.favorite));
       setError(null);
@@ -82,14 +84,16 @@ export const EditVaultItemModal: React.FC<EditVaultItemModalProps> = ({
       let finalImageName = imageName;
       let finalImageSize = imageSize;
       let finalImageType = imageType;
+      let finalImageIv = imageIv;
 
       if (imageFile && user) {
         const uploaded = await uploadVaultImage(user.uid, item.id, imageFile, (p) => setUploadProgress(p));
         finalImageUrl = uploaded.url;
-        setPreviewImageUrl(uploaded.url);
+        setPreviewImageUrl(URL.createObjectURL(imageFile));
         finalImageName = uploaded.name;
         finalImageSize = uploaded.size;
         finalImageType = uploaded.type;
+        finalImageIv = uploaded.iv;
       }
 
       await onSave(item.id, {
@@ -104,6 +108,7 @@ export const EditVaultItemModal: React.FC<EditVaultItemModalProps> = ({
         imageName: finalImageName,
         imageSize: finalImageSize,
         imageType: finalImageType,
+        imageIv: finalImageIv,
         favorite,
       });
       onClose();

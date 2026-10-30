@@ -115,9 +115,12 @@ export const VaultHeader: React.FC<VaultHeaderProps> = ({
             </div>
             <div className="vault-header-brand-details min-w-0">
               <div className="flex items-center space-x-2">
-                <span className="font-extrabold text-lg sm:text-xl tracking-tight text-white group-hover:text-emerald-300 transition-colors font-mono">
-                  VAULT<span className="text-emerald-400">-X</span>
-                </span>
+                <img
+                  src={`${import.meta.env.BASE_URL}vault-x-wordmark.svg`}
+                  alt="VAULT-X"
+                  className="h-6 w-28 object-contain object-left sm:h-7 sm:w-36"
+                  draggable={false}
+                />
                 <span className="hidden sm:flex text-[10px] font-mono tracking-wider uppercase px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/35 items-center gap-1">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping"></span>
                   {t('zero_trust', 'ZERO-TRUST')}
@@ -137,7 +140,7 @@ export const VaultHeader: React.FC<VaultHeaderProps> = ({
             {isInstallable && onInstallApp && (
               <button
                 onClick={onInstallApp}
-                className="hidden sm:inline-flex items-center space-x-1.5 text-xs text-emerald-300 hover:text-white bg-emerald-950/70 hover:bg-emerald-900 border border-emerald-500/40 px-3 py-1.5 rounded-lg transition-all cursor-pointer font-mono"
+                className="hidden sm:inline-flex items-center space-x-1.5 text-xs text-slate-950 hover:text-slate-950 bg-cyan-600 hover:bg-cyan-500 border border-cyan-500 px-3 py-1.5 rounded-lg transition-all cursor-pointer font-mono"
                 title="Install Vault X on your device"
               >
                 <span>📲 {t('nav_install', 'Install App')}</span>

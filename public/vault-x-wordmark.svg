@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="180" viewBox="0 0 900 180" role="img" aria-labelledby="title description">
+  <title id="title">VAULT-X</title>
+  <desc id="description">Futuristic emerald VAULT-X cybersecurity wordmark on a transparent background.</desc>
+  <defs>
+    <linearGradient id="wordmarkGradient" x1="80" y1="25" x2="820" y2="150" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#58A832" />
+      <stop offset="0.38" stop-color="#72B94B" />
+      <stop offset="0.72" stop-color="#347A29" />
+      <stop offset="1" stop-color="#347A29" />
+    </linearGradient>
+    <filter id="greenGlow" x="-10%" y="-35%" width="120%" height="170%" color-interpolation-filters="sRGB">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="4" result="softBlur" />
+      <feFlood flood-color="#72B94B" flood-opacity="0.18" result="glowColor" />
+      <feComposite in="glowColor" in2="softBlur" operator="in" result="glow" />
+      <feMerge>
+        <feMergeNode in="glow" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+  </defs>
+  <text
+    x="450"
+    y="126"
+    text-anchor="middle"
+    fill="url(#wordmarkGradient)"
+    stroke="#FFFFFF"
+    stroke-opacity="0.22"
+    stroke-width="1"
+    paint-order="stroke fill"
+    filter="url(#greenGlow)"
+    font-family="Orbitron, Eurostile, 'Arial', sans-serif"
+    font-size="126"
+    font-weight="800"
+    letter-spacing="11"
+  >VAULT-X</text>
+</svg>

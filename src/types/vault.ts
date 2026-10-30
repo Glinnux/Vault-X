@@ -23,6 +23,7 @@ export interface VaultItem {
   imageName?: string;
   imageSize?: number;
   imageType?: string;
+  imageIv?: string;
   favorite?: boolean;
   createdAt: any;
   updatedAt: any;

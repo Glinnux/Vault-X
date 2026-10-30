@@ -38,6 +38,7 @@ interface AddVaultItemModalProps {
     imageName?: string;
     imageSize?: number;
     imageType?: string;
+    imageIv?: string;
     favorite?: boolean;
   }) => Promise<void>;
 }
@@ -120,7 +121,7 @@ export const AddVaultItemModal: React.FC<AddVaultItemModalProps> = ({
       setSubmitting(true);
       setError(null);
 
-      let uploadedImageInfo: { url: string; name: string; size: number; type: string } | undefined;
+      let uploadedImageInfo: { url: string; name: string; size: number; type: string; iv: string } | undefined;
 
       if (imageFile && user) {
         const tempId = `item_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
@@ -141,6 +142,7 @@ export const AddVaultItemModal: React.FC<AddVaultItemModalProps> = ({
         imageName: uploadedImageInfo?.name,
         imageSize: uploadedImageInfo?.size,
         imageType: uploadedImageInfo?.type,
+        imageIv: uploadedImageInfo?.iv,
         favorite,
       });
 

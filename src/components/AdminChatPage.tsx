@@ -56,7 +56,9 @@ export const AdminChatPage: React.FC<AdminChatPageProps> = ({ admins, currentUse
         if (!active) return;
         setChatDirectory(loaded.directory);
         setChats(loaded.chats);
-        setSelectedChatId((current) => current && loaded.chats.some((chat) => chat.id === current) ? current : loaded.chats[0]?.id || null);
+        // Keep the inbox unselected until the admin explicitly opens a chat.
+        // During refreshes, preserve a selection only while that conversation exists.
+        setSelectedChatId((current) => current && loaded.chats.some((chat) => chat.id === current) ? current : null);
       } catch (error) {
         console.error('Admin chat listener failed:', error);
         if (active) onToast('Admin chat could not be loaded.', 'error');

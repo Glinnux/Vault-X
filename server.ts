@@ -41,10 +41,17 @@ app.use(express.json({ limit: '12mb' }));
 // Basic abuse protection for the local/API server. Production deployments should
 // also enforce rate limits at the hosting proxy or API gateway.
 const requestBuckets = new Map<string, { startedAt: number; count: number }>();
+let lastRequestBucketPruneAt = 0;
 function rateLimit(maxRequests: number, windowMs: number) {
   return (req: Request, res: Response, next: () => void) => {
     const key = `${req.ip || 'unknown'}:${req.path}`;
     const now = Date.now();
+    if (now - lastRequestBucketPruneAt > 60_000 || requestBuckets.size > 20_000) {
+      for (const [bucketKey, value] of requestBuckets) {
+        if (now - value.startedAt > 30 * 60_000) requestBuckets.delete(bucketKey);
+      }
+      lastRequestBucketPruneAt = now;
+    }
     const bucket = requestBuckets.get(key);
     if (!bucket || now - bucket.startedAt >= windowMs) {
       requestBuckets.set(key, { startedAt: now, count: 1 });
@@ -158,8 +165,8 @@ try {
   console.error('[Recovery] Firebase Admin SDK could not initialize:', error);
 }
 
-const RECOVERY_CODE_TTL_MS = 15 * 60 * 1000;
 const RECOVERY_MAX_ATTEMPTS = 5;
+const RECOVERY_CODE_TTL_MS = 24 * 60 * 60 * 1000;
 
 function normalizeEmail(value: unknown): string {
   return String(value || '').trim().toLowerCase();
@@ -305,8 +312,25 @@ async function requireApiUser(req: Request, res: Response, permission?: string |
   return user;
 }
 
-function safeVaultFileName(value: unknown): string {
-  return String(value || 'file').replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 160);
+async function requireActiveVaultUser(req: Request, res: Response) {
+  const user = await requireApiUser(req, res);
+  if (!user) return null;
+  if (!adminDb) {
+    res.status(503).json({ error: 'Vault access checks are temporarily unavailable.' });
+    return null;
+  }
+  try {
+    const userRecord = await adminDb.collection('users').doc(user.uid).get();
+    if (userRecord.data()?.isBanned === true) {
+      res.status(403).json({ error: 'This account is not permitted to access vault files.' });
+      return null;
+    }
+    return user;
+  } catch (error) {
+    console.error('[Vault Access] Could not verify account status:', error);
+    res.status(503).json({ error: 'Vault access checks are temporarily unavailable.' });
+    return null;
+  }
 }
 
 function isAllowedVaultMimeType(value: unknown): boolean {
@@ -347,7 +371,7 @@ function firestoreMillis(value: any): number | null {
 // Supabase Storage is private. Firebase-authenticated users receive only
 // short-lived signed upload/download URLs from this trusted server.
 app.post('/api/vault/files/sign-upload', rateLimit(20, 10 * 60_000), async (req: Request, res: Response) => {
-  const user = await requireApiUser(req, res);
+  const user = await requireActiveVaultUser(req, res);
   if (!user) return;
   if (!supabaseAdmin) {
     res.status(503).json({ error: 'Supabase Storage is not configured on the server.' });
@@ -355,7 +379,6 @@ app.post('/api/vault/files/sign-upload', rateLimit(20, 10 * 60_000), async (req:
   }
 
   const itemId = String(req.body?.itemId || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 100);
-  const fileName = safeVaultFileName(req.body?.fileName);
   const contentType = String(req.body?.contentType || '').toLowerCase();
   const size = Number(req.body?.size);
   if (!itemId || !isAllowedVaultMimeType(contentType) || !Number.isFinite(size) || size <= 0 || size > 50 * 1024 * 1024) {
@@ -363,7 +386,7 @@ app.post('/api/vault/files/sign-upload', rateLimit(20, 10 * 60_000), async (req:
     return;
   }
 
-  const filePath = `users/${user.uid}/vault/${itemId}_${Date.now()}_${fileName}`;
+  const filePath = `users/${user.uid}/vault/${randomBytes(24).toString('hex')}`;
   const { data, error } = await supabaseAdmin.storage.from(SUPABASE_BUCKET).createSignedUploadUrl(filePath);
   if (error || !data?.token) {
     console.error('[Supabase Storage] Could not create upload URL:', error);
@@ -373,14 +396,31 @@ app.post('/api/vault/files/sign-upload', rateLimit(20, 10 * 60_000), async (req:
   res.json({ path: filePath, token: data.token, bucket: SUPABASE_BUCKET });
 });
 
+app.post('/api/vault/files/delete', rateLimit(30, 10 * 60_000), async (req: Request, res: Response) => {
+  const user = await requireActiveVaultUser(req, res);
+  if (!user) return;
+  const filePath = req.body?.path;
+  if (!supabaseAdmin || !isUserVaultPath(filePath, user.uid)) {
+    res.status(400).json({ error: 'Invalid vault file path.' });
+    return;
+  }
+  const { error } = await supabaseAdmin.storage.from(SUPABASE_BUCKET).remove([filePath]);
+  if (error) {
+    console.error('[Supabase Storage] Could not remove migrated file:', error);
+    res.status(502).json({ error: 'Could not remove the old vault file.' });
+    return;
+  }
+  res.json({ removed: true });
+});
+
 app.post('/api/vault/files/sign-download', rateLimit(60, 10 * 60_000), async (req: Request, res: Response) => {
-  const user = await requireApiUser(req, res);
+  const user = await requireActiveVaultUser(req, res);
   if (!user) return;
   if (!supabaseAdmin || !isUserVaultPath(req.body?.path, user.uid)) {
     res.status(400).json({ error: 'Invalid vault file path.' });
     return;
   }
-  const { data, error } = await supabaseAdmin.storage.from(SUPABASE_BUCKET).createSignedUrl(req.body.path, 60 * 60);
+  const { data, error } = await supabaseAdmin.storage.from(SUPABASE_BUCKET).createSignedUrl(req.body.path, 5 * 60);
   if (error || !data?.signedUrl) {
     console.error('[Supabase Storage] Could not create download URL:', error);
     res.status(404).json({ error: 'Could not access the vault file.' });
@@ -637,7 +677,6 @@ app.post('/api/recovery/issue', rateLimit(3, 10 * 60_000), async (req: Request, 
     const code = generateRecoveryCode();
     const salt = randomBytes(16);
     const now = Date.now();
-    const expiresAt = now + RECOVERY_CODE_TTL_MS;
     const requestRef = adminDb.collection('recovery_requests').doc(recoveryLookupId(code));
 
     await requestRef.set({
@@ -649,16 +688,16 @@ app.post('/api/recovery/issue', rateLimit(3, 10 * 60_000), async (req: Request, 
       status: 'issued',
       attempts: 0,
       createdAt: Timestamp.fromMillis(now),
-      expiresAt: Timestamp.fromMillis(expiresAt),
+      expiresAt: Timestamp.fromMillis(now + RECOVERY_CODE_TTL_MS),
     });
 
     await notifyRecoveryAdmins(
       `[Vault X] Recovery code issued for UID ${user.uid}`,
-      `A recovery code was issued for a Vault X account. No recovery code is included in this notification.\n\nUID: ${user.uid}\nAccount email: ${account.email || user.email}\nExpires: ${new Date(expiresAt).toISOString()}\n\nAn admin approval is required before any email change can happen.`,
-      { UID: user.uid, 'Account email': account.email || user.email, Expires: new Date(expiresAt).toISOString() }
+      `A recovery code was issued for a Vault X account. No recovery code is included in this notification.\n\nUID: ${user.uid}\nAccount email: ${account.email || user.email}\nThe code expires in 24 hours and can only be used once. An admin approval is required before any email change can happen.`,
+      { UID: user.uid, 'Account email': account.email || user.email, Expiration: '24 hours; one-time use' }
     );
 
-    res.json({ code, expiresAt });
+    res.json({ code, expiresAt: now + RECOVERY_CODE_TTL_MS });
   } catch (error) {
     console.error('[Recovery] Could not issue recovery code:', error);
     res.status(500).json({ error: 'Could not issue a recovery code.' });
@@ -686,7 +725,9 @@ app.post('/api/recovery/request-email-change', rateLimit(5, 10 * 60_000), async 
       return;
     }
 
-    const expiresAt = request.expiresAt?.toMillis?.() || 0;
+    // Apply the TTL to legacy records too, using createdAt when expiresAt is absent.
+    const expiresAt = request.expiresAt?.toMillis?.() ??
+      ((request.createdAt?.toMillis?.() || 0) + RECOVERY_CODE_TTL_MS);
     if (request.status !== 'issued' || expiresAt <= Date.now()) {
       res.status(400).json({ error: 'The code is invalid or expired.' });
       return;
@@ -730,8 +771,146 @@ app.post('/api/recovery/request-email-change', rateLimit(5, 10 * 60_000), async 
   }
 });
 
+app.post('/api/vault/recovery-email/request', rateLimit(3, 10 * 60_000), async (req: Request, res: Response) => {
+  const user = await requireActiveVaultUser(req, res);
+  if (!user) return;
+  if (!adminDb || !adminAuth) {
+    res.status(503).json({ error: 'Vault recovery email is not configured.' });
+    return;
+  }
+  try {
+    const account = await adminAuth.getUser(user.uid);
+    const isGoogleAccount = account.providerData.some((provider) => provider.providerId === 'google.com');
+    if (!isGoogleAccount || !account.emailVerified || !account.email) {
+      res.status(400).json({ error: 'This recovery email is available to verified Google sign-in accounts.' });
+      return;
+    }
+    const token = randomBytes(32).toString('base64url');
+    const tokenHash = createHash('sha256').update(token).digest('hex');
+    const now = Date.now();
+    await adminDb.collection('vault_recovery_email_tokens').doc(tokenHash).set({
+      uid: user.uid,
+      email: account.email,
+      status: 'issued',
+      createdAt: Timestamp.fromMillis(now),
+      expiresAt: Timestamp.fromMillis(now + 15 * 60_000),
+    });
+    const appUrl = (process.env.APP_URL || (process.env.NODE_ENV === 'production'
+      ? 'https://glinnux.github.io/Vault-X/'
+      : 'http://localhost:3000/')).replace(/\/+$/, '/');
+    const recoveryLink = `${appUrl}#vault-recovery=${encodeURIComponent(token)}`;
+    const delivery = await dispatchEmailNotification({
+      recipientEmail: account.email,
+      subject: '[VAULT-X] Confirm your vault recovery request',
+      replyTo: SUPPORT_EMAIL,
+      fields: {
+        Message: 'Confirm your Vault X recovery request using the secure link in this email.',
+        'Confirmation link': recoveryLink,
+      },
+      textContent: `A request was made to reset your Vault X password. Confirm that you control this Google account by opening the link below within 15 minutes. You will still need your separate recovery key to unlock the vault.\n\n${recoveryLink}\n\nIf you did not request this, ignore this message.`,
+      htmlContent: `<p>A request was made to reset your Vault X password.</p><p>Confirm that you control this Google account by opening the link below within 15 minutes. You will still need your separate recovery key to unlock the vault.</p><p><a href="${recoveryLink}">Confirm and continue vault recovery</a></p><p>If you did not request this, ignore this message.</p>`,
+    });
+    if (!delivery.sent) {
+      await adminDb.collection('vault_recovery_email_tokens').doc(tokenHash).update({ status: 'delivery_failed' });
+      res.status(502).json({ error: 'Could not deliver the recovery email. Please try again later.' });
+      return;
+    }
+    res.json({ message: 'A one-time confirmation link was sent to your verified Google email. It expires in 15 minutes.' });
+  } catch (error) {
+    console.error('[Vault Recovery] Could not send confirmation email:', error);
+    res.status(500).json({ error: 'Could not send the vault recovery email.' });
+  }
+});
+
+app.post('/api/vault/recovery-email/confirm', rateLimit(10, 10 * 60_000), async (req: Request, res: Response) => {
+  const token = String(req.body?.token || '');
+  if (!/^[A-Za-z0-9_-]{40,50}$/.test(token) || !adminDb) {
+    res.status(400).json({ error: 'This recovery link is invalid or expired.' });
+    return;
+  }
+  const tokenHash = createHash('sha256').update(token).digest('hex');
+  const recoveryTicket = randomBytes(32).toString('base64url');
+  const now = Date.now();
+  const requestRef = adminDb.collection('vault_recovery_email_tokens').doc(tokenHash);
+  const ticketRef = adminDb.collection('vault_recovery_tickets').doc(createHash('sha256').update(recoveryTicket).digest('hex'));
+  try {
+    await adminDb.runTransaction(async (transaction) => {
+      const requestSnapshot = await transaction.get(requestRef);
+      const request = requestSnapshot.data();
+      if (!requestSnapshot.exists || request?.status !== 'issued' ||
+          !request.expiresAt || request.expiresAt.toMillis() <= now) {
+        throw new Error('INVALID_OR_EXPIRED');
+      }
+      transaction.update(requestRef, { status: 'confirmed', confirmedAt: Timestamp.fromMillis(now) });
+      transaction.create(ticketRef, {
+        uid: request.uid,
+        requestId: tokenHash,
+        status: 'ready',
+        createdAt: Timestamp.fromMillis(now),
+        expiresAt: Timestamp.fromMillis(now + 15 * 60_000),
+      });
+    });
+    res.json({ ticket: recoveryTicket, expiresAt: now + 15 * 60_000 });
+  } catch (error) {
+    if (error instanceof Error && error.message === 'INVALID_OR_EXPIRED') {
+      res.status(400).json({ error: 'This recovery link is invalid, expired, or already used.' });
+      return;
+    }
+    console.error('[Vault Recovery] Could not confirm email link:', error);
+    res.status(500).json({ error: 'Could not confirm the recovery link.' });
+  }
+});
+
+app.post('/api/vault/recovery-email/complete', rateLimit(5, 10 * 60_000), async (req: Request, res: Response) => {
+  const user = await requireActiveVaultUser(req, res);
+  if (!user || !adminDb) return;
+  const ticket = String(req.body?.ticket || '');
+  const passwordSalt = String(req.body?.passwordSalt || '');
+  const passwordIv = String(req.body?.passwordIv || '');
+  const passwordWrappedKey = String(req.body?.passwordWrappedKey || '');
+  const recoveryIv = String(req.body?.recoveryIv || '');
+  const recoveryWrappedKey = String(req.body?.recoveryWrappedKey || '');
+  if (!/^[A-Za-z0-9_-]{40,50}$/.test(ticket) || !/^[A-Za-z0-9+/]{20,30}={0,2}$/.test(passwordSalt) ||
+      !/^[A-Za-z0-9+/]{16}={0,2}$/.test(passwordIv) || !/^[A-Za-z0-9+/]{40,100}={0,2}$/.test(passwordWrappedKey) ||
+      !/^[A-Za-z0-9+/]{16}={0,2}$/.test(recoveryIv) || !/^[A-Za-z0-9+/]{40,100}={0,2}$/.test(recoveryWrappedKey)) {
+    res.status(400).json({ error: 'The recovery details are invalid.' });
+    return;
+  }
+  const ticketId = createHash('sha256').update(ticket).digest('hex');
+  const ticketRef = adminDb.collection('vault_recovery_tickets').doc(ticketId);
+  const envelopeRef = adminDb.collection('users').doc(user.uid).collection('security').doc('vaultKey');
+  try {
+    await adminDb.runTransaction(async (transaction) => {
+      const ticketSnapshot = await transaction.get(ticketRef);
+      const envelopeSnapshot = await transaction.get(envelopeRef);
+      const ticketData = ticketSnapshot.data();
+      if (!ticketSnapshot.exists || ticketData?.uid !== user.uid || ticketData?.status !== 'ready' ||
+          !ticketData.expiresAt || ticketData.expiresAt.toMillis() <= Date.now() || !envelopeSnapshot.exists) {
+        throw new Error('INVALID_TICKET');
+      }
+      transaction.update(ticketRef, { status: 'used', usedAt: Timestamp.now() });
+      transaction.update(envelopeRef, {
+        passwordSalt,
+        passwordIv,
+        passwordWrappedKey,
+        recoveryIv,
+        recoveryWrappedKey,
+        updatedAt: Timestamp.now(),
+      });
+    });
+    res.json({ message: 'Vault password reset completed. Unlock using your new password.' });
+  } catch (error) {
+    if (error instanceof Error && error.message === 'INVALID_TICKET') {
+      res.status(400).json({ error: 'The recovery confirmation expired or was already used. Request a new email.' });
+      return;
+    }
+    console.error('[Vault Recovery] Could not complete password reset:', error);
+    res.status(500).json({ error: 'Could not complete vault password recovery.' });
+  }
+});
+
 app.get('/api/admin/recovery-requests', async (req: Request, res: Response) => {
-  const user = await requireApiUser(req, res, ['addAdmins', 'answerComplaints']);
+  const user = await requireApiUser(req, res, 'addAdmins');
   if (!user || !adminDb) return;
   try {
     const snapshot = await adminDb.collection('recovery_requests').get();
@@ -755,7 +934,7 @@ app.get('/api/admin/recovery-requests', async (req: Request, res: Response) => {
 });
 
 app.post('/api/admin/recovery-requests/:id/decision', async (req: Request, res: Response) => {
-  const user = await requireApiUser(req, res, ['addAdmins', 'answerComplaints']);
+  const user = await requireApiUser(req, res, 'addAdmins');
   if (!user || !adminDb || !adminAuth) return;
   const approved = req.body?.approved === true;
   const requestRef = adminDb.collection('recovery_requests').doc(req.params.id);
@@ -858,6 +1037,17 @@ INTELLIGENT CONVERSATION RULES:
 - For simple greetings such as "hello", "hi", or "hey", reply with a short friendly welcome and ask how you can help. Do not mention an empty vault or the "+ Add Item" button unless the user asks how to add or store something.
 - Never claim to have completed an action unless the interface actually performed it, and never invent features or security guarantees.`;
 
+const XAI_API_KEY = process.env.XAI_API_KEY?.trim() || '';
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY?.trim() || '';
+const AI_PROVIDER_API_KEY = XAI_API_KEY || OPENAI_API_KEY;
+const AI_PROVIDER_NAME = XAI_API_KEY ? 'grok' : 'openai';
+const AI_PROVIDER_URL = XAI_API_KEY
+  ? 'https://api.x.ai/v1/responses'
+  : 'https://api.openai.com/v1/responses';
+const AI_PROVIDER_MODEL = XAI_API_KEY
+  ? process.env.XAI_MODEL?.trim() || 'grok-4.7'
+  : process.env.OPENAI_MODEL?.trim() || 'gpt-6-luna';
+
 // Intelligent fallback logic when Gemini API key is unavailable or fails
 function getFallbackResponse(query: string): string {
   const q = query.toLowerCase().trim();
@@ -941,6 +1131,15 @@ app.post('/api/chat', rateLimit(20, 60_000), async (req: Request, res: Response)
     }
 
     const trimmed = message.trim();
+    if (!trimmed) {
+      res.status(400).json({ error: 'Message cannot be empty.' });
+      return;
+    }
+    if (trimmed.length > 4000) {
+      res.status(413).json({ error: 'Message is too long. Please keep it under 4,000 characters.' });
+      return;
+    }
+
     const authenticatedUser = await verifyApiUser(req);
     if (!authenticatedUser) {
       res.status(401).json({ error: 'Authentication required.' });
@@ -956,7 +1155,78 @@ app.post('/api/chat', rateLimit(20, 60_000), async (req: Request, res: Response)
       return;
     }
 
-    // Check if Gemini client is available
+    const safeSummary = vaultSummary && typeof vaultSummary === 'object'
+      ? JSON.stringify({
+          total: Number(vaultSummary.total) || 0,
+          credentials: Number(vaultSummary.credentials) || 0,
+          documents: Number(vaultSummary.documents) || 0,
+          favorites: Number(vaultSummary.favorites) || 0,
+          categories: Array.isArray(vaultSummary.categories)
+            ? vaultSummary.categories.filter((category: unknown) => typeof category === 'string').slice(0, 20)
+            : [],
+        })
+      : '{}';
+
+    // Prefer Grok when XAI_API_KEY is configured, otherwise OpenAI. Provider
+    // secrets stay on this server; Gemini and built-in responses remain fallbacks.
+    if (AI_PROVIDER_API_KEY) {
+      try {
+        const input: Array<{ role: 'user' | 'assistant'; content: string }> = [];
+        if (Array.isArray(history)) {
+          for (const item of history.slice(-6)) {
+            if (item && typeof item.text === 'string' && item.text.trim()) {
+              input.push({
+                role: item.role === 'user' ? 'user' : 'assistant',
+                content: item.text.slice(-2000),
+              });
+            }
+          }
+        }
+        input.push({ role: 'user', content: `Safe vault summary (counts/categories only; contains no vault secrets): ${safeSummary}` });
+        input.push({ role: 'user', content: trimmed });
+
+        const aiResponse = await fetch(AI_PROVIDER_URL, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${AI_PROVIDER_API_KEY}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            model: AI_PROVIDER_MODEL,
+            instructions: SYSTEM_INSTRUCTION,
+            input,
+            max_output_tokens: 700,
+            store: false,
+          }),
+          signal: AbortSignal.timeout(15000),
+        });
+
+        if (!aiResponse.ok) {
+          // Avoid logging or returning provider response bodies, which may carry
+          // request details. Continue to the configured fallback provider.
+          console.warn(`[${AI_PROVIDER_NAME}] Chat request failed with HTTP ${aiResponse.status}; using fallback provider.`);
+          throw new Error(`${AI_PROVIDER_NAME} chat request failed.`);
+        }
+
+        const aiData = await aiResponse.json() as {
+          output_text?: string;
+          output?: Array<{ content?: Array<{ type?: string; text?: string }> }>;
+        };
+        const replyText = (aiData.output_text || aiData.output
+          ?.flatMap((item) => item.content || [])
+          .filter((content) => content.type === 'output_text' && typeof content.text === 'string')
+          .map((content) => content.text)
+          .join('\n'))?.trim();
+        if (replyText) {
+          res.json({ reply: replyText, supportEmail: SUPPORT_EMAIL, source: AI_PROVIDER_NAME });
+          return;
+        }
+      } catch {
+        console.warn(`[${AI_PROVIDER_NAME}] Chat request failed or timed out; using fallback provider.`);
+      }
+    }
+
+    // Check if Gemini client is available as a fallback
     if (aiClient) {
       try {
         // Construct conversation contents with system instruction
@@ -974,18 +1244,6 @@ app.post('/api/chat', rateLimit(20, 60_000), async (req: Request, res: Response)
             }
           }
         }
-
-        const safeSummary = vaultSummary && typeof vaultSummary === 'object'
-          ? JSON.stringify({
-              total: Number(vaultSummary.total) || 0,
-              credentials: Number(vaultSummary.credentials) || 0,
-              documents: Number(vaultSummary.documents) || 0,
-              favorites: Number(vaultSummary.favorites) || 0,
-              categories: Array.isArray(vaultSummary.categories)
-                ? vaultSummary.categories.filter((category: unknown) => typeof category === 'string').slice(0, 20)
-                : [],
-            })
-          : '{}';
 
         contents.push({
           role: 'user',
@@ -1049,7 +1307,7 @@ app.post('/api/chat', rateLimit(20, 60_000), async (req: Request, res: Response)
 });
 
 // Persistent Local Storage for Audit Records
-const DATA_DIR = path.resolve(__dirname, 'data');
+const DATA_DIR = path.resolve(process.env.DATA_DIR || path.join(__dirname, 'data'));
 if (!fs.existsSync(DATA_DIR)) {
   try {
     fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -1059,6 +1317,12 @@ if (!fs.existsSync(DATA_DIR)) {
 }
 const PAYMENTS_FILE = path.resolve(DATA_DIR, 'payment_submissions.json');
 const TICKETS_FILE = path.resolve(DATA_DIR, 'support_submissions.json');
+
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (char) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  })[char] || char);
+}
 
 export interface StoredPayment {
   id: string;
@@ -1211,9 +1475,9 @@ async function dispatchEmailNotification({
         from: `"Clockin Vault" <${smtpUser}>`,
         to: recipientEmail,
         replyTo: replyTo || smtpUser,
-        subject,
+        subject: subject.replace(/[\r\n]+/g, ' ').slice(0, 250),
         text: textContent,
-        html: htmlContent || `<pre style="font-family:sans-serif;white-space:pre-wrap;">${textContent}</pre>`,
+        html: htmlContent || `<pre style="font-family:sans-serif;white-space:pre-wrap;">${escapeHtml(textContent)}</pre>`,
         attachments,
       });
 
@@ -1232,7 +1496,7 @@ async function dispatchEmailNotification({
   try {
     const appUrl = process.env.APP_URL || 'https://clockinvault.local';
     const formSubmitPayload: Record<string, any> = {
-      _subject: subject,
+      _subject: subject.replace(/[\r\n]+/g, ' ').slice(0, 250),
       _replyto: replyTo || SUPPORT_EMAIL,
       _template: 'table',
       ...fields,

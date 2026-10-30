@@ -46,6 +46,7 @@ interface VaultChatbotProps {
 
 const DEFAULT_SUPPORT_EMAIL = 'oluwolefaith92@gmail.com';
 const SUPPORT_EMAIL_LABEL = 'Help';
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
 
 const QUICK_PROMPTS = [
   {
@@ -186,7 +187,7 @@ export const VaultChatbot: React.FC<VaultChatbotProps> = ({
 
       const idToken = await auth.currentUser?.getIdToken();
 
-      const res = await fetch('/api/chat', {
+      const res = await fetch(`${API_BASE_URL}/api/chat`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

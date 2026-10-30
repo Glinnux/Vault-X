@@ -1,5 +1,8 @@
 import { supabase } from '../lib/supabase';
 import { auth } from '../lib/firebase';
+import { decryptVaultBlob, encryptVaultBlob } from './vaultCrypto';
+
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
 
 export const MAX_IMAGE_SIZE_BYTES = 50 * 1024 * 1024; // 50 MB
 
@@ -53,7 +56,7 @@ export async function uploadVaultImage(
   itemId: string,
   file: File,
   onProgress?: (percent: number) => void
-): Promise<{ url: string; name: string; size: number; type: string }> {
+): Promise<{ url: string; name: string; size: number; type: string; iv: string }> {
   const validation = validateImageFile(file);
   if (!validation.valid) {
     throw new Error(validation.error);
@@ -64,8 +67,9 @@ export async function uploadVaultImage(
   if (!account || account.uid !== userId) throw new Error('Please sign in again before uploading.');
 
   try {
+    const encryptedFile = await encryptVaultBlob(file);
     const token = await account.getIdToken();
-    const response = await fetch('/api/vault/files/sign-upload', {
+    const response = await fetch(`${API_BASE_URL}/api/vault/files/sign-upload`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       body: JSON.stringify({ itemId, fileName: file.name, contentType: file.type, size: file.size }),
@@ -75,7 +79,8 @@ export async function uploadVaultImage(
       throw new Error(details.error || 'Could not prepare the secure upload.');
     }
 
-    const { error } = await supabase.storage.from(details.bucket).uploadToSignedUrl(details.path, details.token, file);
+    const encryptedUpload = new File([encryptedFile.blob], file.name, { type: file.type || 'application/octet-stream' });
+    const { error } = await supabase.storage.from(details.bucket).uploadToSignedUrl(details.path, details.token, encryptedUpload);
     if (error) throw error;
     onProgress?.(100);
 
@@ -85,6 +90,7 @@ export async function uploadVaultImage(
       name: file.name,
       size: file.size,
       type: file.type || 'image/jpeg',
+      iv: encryptedFile.iv,
     };
   } catch (storageError: any) {
     console.error('Secure Supabase Storage upload failed:', storageError);
@@ -92,7 +98,7 @@ export async function uploadVaultImage(
   }
 }
 
-export async function resolveVaultFileUrl(storedUrl?: string): Promise<string | undefined> {
+export async function resolveVaultFileUrl(storedUrl?: string, iv?: string, mimeType?: string): Promise<string | undefined> {
   if (!storedUrl) return undefined;
   if (!storedUrl.startsWith('supabase://')) return storedUrl;
   const separator = storedUrl.indexOf('/', 'supabase://'.length);
@@ -102,12 +108,46 @@ export async function resolveVaultFileUrl(storedUrl?: string): Promise<string | 
   const account = auth.currentUser;
   if (!account) return undefined;
   const token = await account.getIdToken();
-  const response = await fetch('/api/vault/files/sign-download', {
+  const response = await fetch(`${API_BASE_URL}/api/vault/files/sign-download`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify({ bucket, path }),
   });
   if (!response.ok) return undefined;
   const data = await response.json();
-  return data.url;
+  if (!iv) return data.url; // Legacy files remain readable and are not yet encrypted.
+  const fileResponse = await fetch(data.url);
+  if (!fileResponse.ok) throw new Error('Could not download the encrypted vault file.');
+  const decrypted = await decryptVaultBlob(await fileResponse.arrayBuffer(), iv, mimeType || 'application/octet-stream');
+  return URL.createObjectURL(decrypted);
+}
+
+export async function migrateLegacyVaultFile(
+  userId: string,
+  itemId: string,
+  storedUrl: string,
+  name: string,
+  mimeType: string
+): Promise<{ url: string; iv: string; oldPath: string }> {
+  const oldPath = storedUrl.slice(storedUrl.indexOf('/', 'supabase://'.length) + 1);
+  const legacyDownloadUrl = await resolveVaultFileUrl(storedUrl);
+  if (!legacyDownloadUrl) throw new Error('Could not access the old vault file for encryption.');
+  const response = await fetch(legacyDownloadUrl);
+  if (!response.ok) throw new Error('Could not download the old vault file for encryption.');
+  const oldBlob = await response.blob();
+  const original = new File([oldBlob], name || 'vault-document', { type: mimeType || oldBlob.type || 'application/octet-stream' });
+  const uploaded = await uploadVaultImage(userId, `${itemId}_migration`, original);
+  return { url: uploaded.url, iv: uploaded.iv, oldPath };
+}
+
+export async function deleteVaultFilePath(path: string): Promise<void> {
+  const account = auth.currentUser;
+  if (!account) throw new Error('Please sign in again before removing the old file.');
+  const token = await account.getIdToken();
+  const response = await fetch(`${API_BASE_URL}/api/vault/files/delete`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ path }),
+  });
+  if (!response.ok) throw new Error('The old unencrypted file could not be removed from storage.');
 }

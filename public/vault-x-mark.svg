@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title">
+  <title id="title">Vault-X emblem</title>
+  <defs>
+    <linearGradient id="orbit" x1="84" y1="82" x2="428" y2="428" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#58A832" />
+      <stop offset="0.55" stop-color="#72B94B" />
+      <stop offset="1" stop-color="#347A29" />
+    </linearGradient>
+    <linearGradient id="vFill" x1="146" y1="87" x2="362" y2="425" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#58A832" />
+      <stop offset="0.48" stop-color="#72B94B" />
+      <stop offset="1" stop-color="#347A29" />
+    </linearGradient>
+    <linearGradient id="wingFill" x1="123" y1="250" x2="389" y2="398" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#72B94B" />
+      <stop offset="1" stop-color="#347A29" />
+    </linearGradient>
+    <filter id="emeraldGlow" x="-30%" y="-30%" width="160%" height="160%" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="5" result="blur" />
+      <feColorMatrix in="blur" type="matrix" values="0 0 0 0 0.345  0 0 0 0 0.659  0 0 0 0 0.196  0 0 0 .22 0" result="tint" />
+      <feMerge><feMergeNode in="tint" /><feMergeNode in="SourceGraphic" /></feMerge>
+    </filter>
+  </defs>
+
+  <!-- Open orbital ring echoes the circular emblem in the supplied brand reference. -->
+  <path d="M111 343a177 177 0 1 1 290 0" fill="none" stroke="url(#orbit)" stroke-width="9" stroke-linecap="round" opacity=".96" filter="url(#emeraldGlow)" />
+  <path d="M132 330a151 151 0 1 1 248 0" fill="none" stroke="#72B94B" stroke-width="2" opacity=".28" />
+
+  <!-- Side blades and central angular V, kept simple for crisp small-size use. -->
+  <path d="m93 259 43-33 84 124-42 32zM419 259l-43-33-84 124 42 32z" fill="url(#wingFill)" stroke="#72B94B" stroke-width="3" />
+  <path d="M76 78h91l89 145 89-145h91L256 431z" fill="url(#vFill)" stroke="#58A832" stroke-width="5" stroke-linejoin="bevel" filter="url(#emeraldGlow)" />
+  <path d="m190 83 66 81 66-81z" fill="#303830" opacity=".92" />
+  <path d="m202 88 54 65 54-65z" fill="url(#orbit)" />
+  <path d="M256 229v170" stroke="#FFFFFF" stroke-width="3" stroke-opacity=".35" />
+</svg>

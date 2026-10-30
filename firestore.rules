@@ -109,7 +109,7 @@ service cloud.firestore {
       return data.keys().hasAll(['userId', 'type', 'title', 'category', 'favorite', 'createdAt', 'updatedAt']) &&
         data.keys().hasOnly([
           'userId', 'type', 'title', 'service', 'username', 'password', 'url', 'category',
-          'notes', 'imageUrl', 'imageName', 'imageSize', 'imageType', 'favorite', 'createdAt', 'updatedAt'
+          'notes', 'imageUrl', 'imageName', 'imageSize', 'imageType', 'imageIv', 'encryptedData', 'favorite', 'createdAt', 'updatedAt'
         ]) &&
         data.userId is string && data.userId == request.auth.uid &&
         data.type in ['credential', 'document'] &&
@@ -125,7 +125,17 @@ service cloud.firestore {
         (!('imageUrl' in data.keys()) || (data.imageUrl is string && data.imageUrl.size() <= 2048)) &&
         (!('imageName' in data.keys()) || (data.imageName is string && data.imageName.size() <= 255)) &&
         (!('imageSize' in data.keys()) || (data.imageSize is number && data.imageSize >= 0 && data.imageSize <= 52428800)) &&
-        (!('imageType' in data.keys()) || (data.imageType is string && data.imageType.size() <= 100));
+        (!('imageType' in data.keys()) || (data.imageType is string && data.imageType.size() <= 100)) &&
+        (!('imageIv' in data.keys()) || (data.imageIv is string && data.imageIv.size() == 16)) &&
+        (!('encryptedData' in data.keys()) || (
+          data.encryptedData is map &&
+          data.title == 'Encrypted item' &&
+          !data.keys().hasAny(['service', 'username', 'password', 'url', 'notes', 'imageName']) &&
+          data.encryptedData.keys().hasOnly(['version', 'iv', 'ciphertext']) &&
+          data.encryptedData.version == 1 &&
+          data.encryptedData.iv is string && data.encryptedData.iv.size() == 16 &&
+          data.encryptedData.ciphertext is string && data.encryptedData.ciphertext.size() <= 100000
+        ));
     }
 
     // 4. SupportTicket Entity Validator
@@ -175,6 +185,11 @@ service cloud.firestore {
         // Unbanning rule: if account is currently banned, only superadmin can unban it!
         (!('isBanned' in existing()) || existing().isBanned == false || incoming().isBanned == true || isSuperAdmin());
       allow delete: if false;
+
+      match /security/{securityDoc} {
+        allow get, create, update: if isOwner(userId) && !isAccountBanned(userId) && securityDoc == 'vaultKey';
+        allow list, delete: if false;
+      }
 
       // 6. Zero-Knowledge Private Vault: strictly isolated per user (blocked if banned)
       match /vault/{itemId} {

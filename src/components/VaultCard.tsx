@@ -61,16 +61,23 @@ export const VaultCard: React.FC<VaultCardProps> = ({
 
   useEffect(() => {
     let active = true;
+    let createdObjectUrl: string | undefined;
     setResolvedImageUrl(item.imageUrl);
     if (item.imageUrl?.startsWith('supabase://')) {
-      resolveVaultFileUrl(item.imageUrl).then((url) => {
-        if (active) setResolvedImageUrl(url);
+      resolveVaultFileUrl(item.imageUrl, item.imageIv, item.imageType).then((url) => {
+        if (active) {
+          createdObjectUrl = url?.startsWith('blob:') ? url : undefined;
+          setResolvedImageUrl(url);
+        }
       }).catch(() => {
         if (active) setResolvedImageUrl(undefined);
       });
     }
-    return () => { active = false; };
-  }, [item.imageUrl]);
+    return () => {
+      active = false;
+      if (createdObjectUrl) URL.revokeObjectURL(createdObjectUrl);
+    };
+  }, [item.imageUrl, item.imageIv, item.imageType]);
 
   // Auto-hide password after 15 seconds for privacy
   useEffect(() => {

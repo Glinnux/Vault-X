@@ -32,6 +32,8 @@ import { VaultChatbot } from './components/VaultChatbot';
 import { SlotUpgradeSideBox } from './components/SlotUpgradeSideBox';
 import { PaymentPage } from './components/PaymentPage';
 import { SupportPage } from './components/SupportPage';
+import { ScrollNetworkAnimation } from './components/ScrollNetworkAnimation';
+import { VaultSecurityGate } from './components/VaultSecurityGate';
 import {
   subscribeToVault,
   createVaultItem,
@@ -62,6 +64,9 @@ function VaultApp() {
     signOut,
     recoveryNotice,
     clearRecoveryNotice,
+    vaultUnlocked,
+    vaultRecoveryKeyNotice,
+    confirmVaultRecoveryEmail,
   } = useAuth();
   const { t, isAutoMode, currentLangInfo } = useLanguage();
   const { isMobileDevice } = useDeviceDetection();
@@ -126,6 +131,21 @@ function VaultApp() {
       setToast((current) => (current?.message === message ? null : current));
     }, 3000);
   }, []);
+
+  useEffect(() => {
+    const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+    const emailToken = hashParams.get('vault-recovery');
+    if (!emailToken) return;
+    window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
+    confirmVaultRecoveryEmail(emailToken)
+      .then(() => {
+        showToast('Gmail confirmation verified. Sign in to continue vault recovery.', 'success');
+        if (!user) openAuthModal();
+      })
+      .catch((error: unknown) => {
+        showToast(error instanceof Error ? error.message : 'Recovery link could not be confirmed.', 'error');
+      });
+  }, [confirmVaultRecoveryEmail, openAuthModal, showToast, user]);
 
   // Subscription & Slot state (10 slots on free plan, +20 on paid, unlimited for admin)
   const [subscription, setSubscription] = useState<UserSubscription>(() => {
@@ -361,6 +381,10 @@ function VaultApp() {
         </footer>
       </div>
     );
+  }
+
+  if (user && (!vaultUnlocked || vaultRecoveryKeyNotice)) {
+    return <VaultSecurityGate user={user} />;
   }
 
   return (
@@ -724,6 +748,7 @@ function VaultApp() {
           )}
         </div>
         )}
+        {viewMode === 'all' && <ScrollNetworkAnimation />}
       </main>
 
       {/* Footer */}
@@ -804,7 +829,7 @@ function VaultApp() {
             <div className="my-5 rounded-xl border border-amber-400/40 bg-black/50 py-4 text-center text-2xl font-mono font-bold tracking-[0.35em] text-amber-200">
               {recoveryNotice.code}
             </div>
-            <p className="text-[11px] text-slate-400">Expires in 15 minutes. Admin approval is required before an email change is applied.</p>
+            <p className="text-[11px] text-slate-400">This code expires after 24 hours and can only be used once. Admin approval is required before an email change is applied.</p>
             <button
               type="button"
               onClick={clearRecoveryNotice}

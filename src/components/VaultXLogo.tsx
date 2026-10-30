@@ -35,18 +35,18 @@ export const VaultXLogo: React.FC<VaultXLogoProps> = ({
         {/* Ambient Blue Glow Backing */}
         {showGlow && (
           <div
-            className="absolute inset-0 rounded-2xl bg-blue-500/20 blur-md pointer-events-none transform scale-110"
+            className="absolute inset-0 rounded-2xl bg-emerald-500/20 blur-md pointer-events-none transform scale-110"
             aria-hidden="true"
           />
         )}
 
         <img
-          src={`${import.meta.env.BASE_URL}vault-x-logo.png`}
+          src={`${import.meta.env.BASE_URL}vault-x-mark.svg`}
           alt="Vault X"
           width="100%"
           height="100%"
           draggable={false}
-          className="relative z-10 object-contain drop-shadow-[0_4px_12px_rgba(37,99,235,0.3)] animate-subtle-float"
+            className="relative z-10 object-contain drop-shadow-[0_4px_12px_rgba(88,168,50,0.16)] animate-subtle-float"
         />
       </div>
 

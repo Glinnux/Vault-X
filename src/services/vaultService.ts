@@ -8,9 +8,13 @@ import {
   query,
   orderBy,
   serverTimestamp,
+  getDoc,
+  deleteField,
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { VaultCategory, VaultItem, VaultItemType } from '../types/vault';
+import { decryptVaultValue, encryptVaultValue, getActiveVaultKey } from './vaultCrypto';
+import { deleteVaultFilePath, migrateLegacyVaultFile } from './imageStorageService';
 
 export interface CreateVaultItemPayload {
   type: VaultItemType;
@@ -25,6 +29,7 @@ export interface CreateVaultItemPayload {
   imageName?: string;
   imageSize?: number;
   imageType?: string;
+  imageIv?: string;
   favorite?: boolean;
 }
 
@@ -40,6 +45,7 @@ export interface UpdateVaultItemPayload {
   imageName?: string;
   imageSize?: number;
   imageType?: string;
+  imageIv?: string;
   favorite?: boolean;
 }
 
@@ -58,29 +64,68 @@ export function subscribeToVault(
   return onSnapshot(
     q,
     (snapshot) => {
-      const items: VaultItem[] = snapshot.docs.map((docSnap) => {
+      void Promise.all(snapshot.docs.map(async (docSnap) => {
         const data = docSnap.data();
-        return {
+        const sensitive = data.encryptedData
+          ? await decryptVaultValue<Pick<VaultItem, 'title' | 'service' | 'username' | 'password' | 'url' | 'notes' | 'imageName'>>(data.encryptedData)
+          : {
+              title: data.title || '', service: data.service, username: data.username,
+              password: data.password, url: data.url, notes: data.notes, imageName: data.imageName,
+            };
+        let migratedFile: { url: string; iv: string; oldPath: string } | null = null;
+        if (data.imageUrl?.startsWith('supabase://') && !data.imageIv) {
+          try {
+            migratedFile = await migrateLegacyVaultFile(userId, docSnap.id, data.imageUrl, sensitive.imageName || '', data.imageType || '');
+          } catch (migrationError) {
+            console.error(`[Vault Migration] Could not encrypt attachment for ${docSnap.id}:`, migrationError);
+          }
+        }
+        const item: VaultItem = {
           id: docSnap.id,
           userId: data.userId || userId,
           type: (data.type as VaultItemType) || 'credential',
-          title: data.title || '',
-          service: data.service,
-          username: data.username,
-          password: data.password,
-          url: data.url,
+          ...sensitive,
           category: (data.category as VaultCategory) || 'other',
-          notes: data.notes,
-          imageUrl: data.imageUrl,
-          imageName: data.imageName,
+          imageUrl: migratedFile?.url || data.imageUrl,
           imageSize: data.imageSize,
           imageType: data.imageType,
+          imageIv: migratedFile?.iv || data.imageIv,
           favorite: Boolean(data.favorite),
           createdAt: data.createdAt,
           updatedAt: data.updatedAt,
         };
+
+        // Opportunistically migrate existing plaintext records after the user
+        // unlocks their key. The plaintext fields are removed in the same write.
+        if (!data.encryptedData || migratedFile) {
+          const legacyUpdates: Record<string, unknown> = { updatedAt: serverTimestamp() };
+          if (!data.encryptedData) {
+          const encryptedData = await encryptVaultValue({
+            title: sensitive.title || 'Untitled', service: sensitive.service, username: sensitive.username,
+            password: sensitive.password, url: sensitive.url, notes: sensitive.notes, imageName: sensitive.imageName,
+          });
+            legacyUpdates.title = 'Encrypted item';
+            legacyUpdates.encryptedData = encryptedData;
+            for (const field of ['service', 'username', 'password', 'url', 'notes', 'imageName']) legacyUpdates[field] = deleteField();
+          }
+          if (migratedFile) {
+            legacyUpdates.imageUrl = migratedFile.url;
+            legacyUpdates.imageIv = migratedFile.iv;
+          }
+          await updateDoc(doc(db, 'users', userId, 'vault', docSnap.id), legacyUpdates);
+          if (migratedFile) {
+            try {
+              await deleteVaultFilePath(migratedFile.oldPath);
+            } catch (deleteError) {
+              console.error(`[Vault Migration] Old plaintext attachment remains for ${docSnap.id}:`, deleteError);
+            }
+          }
+        }
+        return item;
+      })).then(onUpdate).catch((error) => {
+        console.error('Could not decrypt or migrate vault records:', error);
+        onError(error);
       });
-      onUpdate(items);
     },
     (error) => {
       console.error('Error listening to vault items:', error);
@@ -106,36 +151,28 @@ export async function createVaultItem(
   const newDocRef = doc(vaultRef);
   const docPath = `users/${userId}/vault/${newDocRef.id}`;
 
+  const encryptedData = await encryptVaultValue({
+    title: cleanTitle,
+    service: payload.service?.trim().slice(0, 100),
+    username: payload.username?.trim().slice(0, 320),
+    password: payload.password?.trim().slice(0, 500),
+    url: payload.url?.trim().slice(0, 1024),
+    notes: payload.notes?.trim().slice(0, 5000),
+    imageName: payload.imageName?.slice(0, 255),
+  });
   const itemDoc: Record<string, any> = {
     userId,
     type: payload.type || 'credential',
-    title: cleanTitle,
+    title: 'Encrypted item',
+    encryptedData,
     category: payload.category || 'other',
     favorite: Boolean(payload.favorite),
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   };
 
-  if (payload.service && payload.service.trim()) {
-    itemDoc.service = payload.service.trim().slice(0, 100);
-  }
-  if (payload.username && payload.username.trim()) {
-    itemDoc.username = payload.username.trim().slice(0, 320);
-  }
-  if (payload.password && payload.password.trim()) {
-    itemDoc.password = payload.password.trim().slice(0, 500);
-  }
-  if (payload.url && payload.url.trim()) {
-    itemDoc.url = payload.url.trim().slice(0, 1024);
-  }
-  if (payload.notes && payload.notes.trim()) {
-    itemDoc.notes = payload.notes.trim().slice(0, 5000);
-  }
   if (payload.imageUrl) {
     itemDoc.imageUrl = payload.imageUrl;
-  }
-  if (payload.imageName) {
-    itemDoc.imageName = payload.imageName.slice(0, 255);
   }
   if (payload.imageSize !== undefined) {
     itemDoc.imageSize = payload.imageSize;
@@ -143,6 +180,7 @@ export async function createVaultItem(
   if (payload.imageType) {
     itemDoc.imageType = payload.imageType.slice(0, 100);
   }
+  if (payload.imageIv) itemDoc.imageIv = payload.imageIv;
 
   try {
     await setDoc(newDocRef, itemDoc);
@@ -164,38 +202,34 @@ export async function updateVaultItem(
   const docPath = `users/${userId}/vault/${itemId}`;
   const itemRef = doc(db, 'users', userId, 'vault', itemId);
 
+  getActiveVaultKey();
+  const existingSnapshot = await getDoc(itemRef);
+  if (!existingSnapshot.exists()) throw new Error('Vault item not found.');
+  const existing = existingSnapshot.data();
+  const oldSensitive = existing.encryptedData
+    ? await decryptVaultValue<Record<string, string | undefined>>(existing.encryptedData)
+    : {
+        title: existing.title, service: existing.service, username: existing.username, password: existing.password,
+        url: existing.url, notes: existing.notes, imageName: existing.imageName,
+      };
+  const mergedSensitive = { ...oldSensitive };
+  for (const field of ['title', 'service', 'username', 'password', 'url', 'notes', 'imageName'] as const) {
+    if (payload[field] !== undefined) mergedSensitive[field] = payload[field] as string;
+  }
+  if (payload.title !== undefined && !payload.title.trim()) throw new Error('Title cannot be empty');
+  const encryptedData = await encryptVaultValue(mergedSensitive);
+
   const updates: Record<string, any> = {
+    title: 'Encrypted item',
+    encryptedData,
     updatedAt: serverTimestamp(),
   };
-
-  if (payload.title !== undefined) {
-    const cleanTitle = payload.title.trim().slice(0, 200);
-    if (!cleanTitle) throw new Error('Title cannot be empty');
-    updates.title = cleanTitle;
-  }
-  if (payload.service !== undefined) {
-    updates.service = payload.service.trim().slice(0, 100);
-  }
-  if (payload.username !== undefined) {
-    updates.username = payload.username.trim().slice(0, 320);
-  }
-  if (payload.password !== undefined) {
-    updates.password = payload.password.trim().slice(0, 500);
-  }
-  if (payload.url !== undefined) {
-    updates.url = payload.url.trim().slice(0, 1024);
-  }
+  for (const field of ['service', 'username', 'password', 'url', 'notes', 'imageName'] as const) updates[field] = deleteField();
   if (payload.category !== undefined) {
     updates.category = payload.category;
   }
-  if (payload.notes !== undefined) {
-    updates.notes = payload.notes.trim().slice(0, 5000);
-  }
   if (payload.imageUrl !== undefined) {
     updates.imageUrl = payload.imageUrl;
-  }
-  if (payload.imageName !== undefined) {
-    updates.imageName = payload.imageName;
   }
   if (payload.imageSize !== undefined) {
     updates.imageSize = payload.imageSize;
@@ -203,6 +237,7 @@ export async function updateVaultItem(
   if (payload.imageType !== undefined) {
     updates.imageType = payload.imageType;
   }
+  if (payload.imageIv !== undefined) updates.imageIv = payload.imageIv;
   if (payload.favorite !== undefined) {
     updates.favorite = Boolean(payload.favorite);
   }

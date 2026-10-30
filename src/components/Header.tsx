@@ -17,7 +17,7 @@ export const Header: React.FC<HeaderProps> = ({
   const { user, openAuthModal, signOut, loading } = useAuth();
 
   return (
-    <header className="sticky top-0 z-30 bg-[#040e08]/90 backdrop-blur-md border-b border-emerald-950 text-white">
+    <header className="site-chrome sticky top-0 z-30 bg-[#040e08]/90 backdrop-blur-md border-b border-emerald-950 text-white">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
         {/* Brand */}
         <div className="flex items-center space-x-3">

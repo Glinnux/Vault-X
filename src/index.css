@@ -2,20 +2,19 @@
 
 :root {
   color-scheme: light;
-  --theme-navy: #1e2761;
-  --theme-primary: #408ec6;
-  --theme-primary-hover: #3279ad;
-  --theme-accent: #408ec6;
-  --theme-background: #fffdf5;
+  --theme-background: #f3f8ef;
+  --theme-navy: #ffffff;
   --theme-surface: #ffffff;
-  --theme-surface-muted: #f4f2eb;
-  --theme-text: #1e2761;
-  --theme-text-muted: #667085;
-  --theme-border: #d9dee8;
-  --theme-success: #7a2048;
-  --theme-success-text: #7a2048;
-  --theme-error: #7a2048;
-  --theme-shadow: 30 39 97;
+  --theme-surface-elevated: #eaf4e4;
+  --theme-primary: #58a832;
+  --theme-primary-hover: #72b94b;
+  --theme-accent: #72b94b;
+  --theme-text: #303830;
+  --theme-text-muted: #788078;
+  --theme-border: #dce7d6;
+  --theme-success: #347a29;
+  --theme-warning: #788078;
+  --theme-error: #303830;
 }
 
 html {
@@ -32,6 +31,12 @@ body {
   overflow-y: auto;
   background-color: var(--theme-background);
   color: var(--theme-text);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+::selection {
+  background: #eaf4e4;
+  color: #303830;
 }
 
 /* Keep vault contents out of browser print/PDF output. Operating systems can
@@ -61,34 +66,35 @@ body,
 .site-chrome {
   background-color: var(--theme-navy) !important;
   border-color: var(--theme-border) !important;
-  color: #f8fafc !important;
-  box-shadow: 0 8px 24px rgb(var(--theme-shadow) / 0.08);
+  color: var(--theme-text) !important;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.22);
 }
 
 .site-chrome [class~="text-white"],
 .site-chrome [class~="text-slate-100"],
 .site-chrome [class~="text-slate-200"] {
-  color: #f8fafc !important;
+  color: var(--theme-text) !important;
 }
 
 .site-chrome [class~="text-slate-300"],
 .site-chrome [class~="text-slate-400"],
 .site-chrome [class~="text-slate-500"] {
-  color: #cbd5e1 !important;
+  color: var(--theme-text-muted) !important;
 }
 
 .site-chrome [class*="text-emerald-"] {
-  color: #9ec8e5 !important;
+  color: var(--theme-success) !important;
 }
 
 .site-chrome [class*="bg-emerald-950"] {
-  background-color: rgb(255 255 255 / 0.08) !important;
+  background-color: var(--theme-surface-elevated) !important;
 }
 
 .app-shell [class*="bg-[#"],
+.app-shell [class*="bg-gray-950"],
+.app-shell [class*="bg-gray-900"],
 .app-shell [class*="bg-slate-950"],
 .app-shell [class*="bg-slate-900"],
-.app-shell [class*="bg-slate-800"],
 .app-shell [class*="bg-emerald-950"],
 .app-shell [class*="bg-emerald-900"],
 .app-shell [class*="bg-cyan-950"],
@@ -97,32 +103,68 @@ body,
   background-color: var(--theme-surface) !important;
 }
 
+.app-shell [class*="bg-slate-800"],
 .app-shell [class*="bg-slate-700"],
+.app-shell [class*="bg-gray-800"],
+.app-shell [class*="bg-gray-700"],
 .app-shell [class*="bg-emerald-800"],
 .app-shell [class*="bg-cyan-900"],
 .app-shell [class*="bg-blue-900"],
 .app-shell [class*="bg-indigo-900"] {
-  background-color: var(--theme-surface-muted) !important;
+  background-color: var(--theme-surface-elevated) !important;
+}
+
+/* Re-skin legacy dark/blue utility classes without changing component layout. */
+.app-shell [class*="bg-cyan-"],
+.app-shell [class*="bg-blue-"],
+.app-shell [class*="bg-sky-"],
+.app-shell [class*="bg-indigo-"],
+.app-shell [class*="bg-slate-"],
+.app-shell [class*="bg-gray-"],
+.app-shell [class*="bg-zinc-"],
+.app-shell [class*="bg-neutral-"],
+.app-shell [class*="bg-stone-"],
+.app-shell [class*="bg-emerald-"] {
+  background-color: var(--theme-surface-elevated) !important;
+  background-image: none !important;
+}
+
+.app-shell [class*="bg-black/"],
+.app-shell [class*="bg-white/"] {
+  background-color: var(--theme-surface-elevated) !important;
+}
+
+.app-shell [class*="bg-black/"] {
+  background-color: rgb(48 56 48 / 0.58) !important;
+}
+
+.app-shell [class*="text-black"] {
+  color: var(--theme-text) !important;
 }
 
 .app-shell [class*="border-slate-"],
+.app-shell [class*="border-gray-"],
+.app-shell [class*="border-cyan-"],
+.app-shell [class*="border-blue-"],
+.app-shell [class*="border-indigo-"],
 .app-shell [class*="border-emerald-950"],
 .app-shell [class*="border-emerald-900"],
-.app-shell [class*="border-cyan-950"],
-.app-shell [class*="border-blue-950"],
-.app-shell [class*="border-indigo-950"] {
+.app-shell [class*="border-emerald-800"] {
   border-color: var(--theme-border) !important;
 }
 
 .app-shell [class~="text-white"],
 .app-shell [class~="text-slate-100"],
-.app-shell [class~="text-slate-200"],
-.app-shell [class~="text-slate-300"] {
+.app-shell [class~="text-slate-200"] {
   color: var(--theme-text) !important;
 }
 
+.app-shell [class~="text-slate-300"],
 .app-shell [class~="text-slate-400"],
-.app-shell [class~="text-slate-500"] {
+.app-shell [class~="text-slate-500"],
+.app-shell [class*="text-gray-300"],
+.app-shell [class*="text-gray-400"],
+.app-shell [class*="text-gray-500"] {
   color: var(--theme-text-muted) !important;
 }
 
@@ -132,29 +174,63 @@ body,
   color: var(--theme-primary) !important;
 }
 
+.app-shell [class*="text-sky-"],
+.app-shell [class*="text-teal-"],
+.app-shell [class*="text-lime-"] {
+  color: var(--theme-primary-hover) !important;
+}
+
 .app-shell [class*="text-emerald-"] {
-  color: var(--theme-success-text) !important;
+  color: var(--theme-primary) !important;
+}
+
+.app-shell [class*="text-amber-"] {
+  color: var(--theme-warning) !important;
 }
 
 .app-shell [class*="text-rose-"],
 .app-shell [class*="text-red-"] {
-  color: var(--theme-error) !important;
+  color: var(--theme-text-muted) !important;
+}
+
+.app-shell [class*="text-purple-"],
+.app-shell [class*="text-violet-"],
+.app-shell [class*="text-fuchsia-"] {
+  color: var(--theme-accent) !important;
 }
 
 .app-shell [class*="border-rose-"],
 .app-shell [class*="border-red-"] {
-  border-color: rgb(122 32 72 / 0.5) !important;
+  border-color: rgb(239 68 68 / 0.48) !important;
 }
 
 .app-shell [class*="bg-rose-"],
 .app-shell [class*="bg-red-"] {
-  background-color: rgb(122 32 72 / 0.1) !important;
+  background-color: var(--theme-surface-elevated) !important;
+}
+
+.app-shell [class*="border-purple-"],
+.app-shell [class*="border-violet-"],
+.app-shell [class*="border-fuchsia-"] {
+  border-color: rgb(5 150 105 / 0.45) !important;
+}
+
+.app-shell [class*="bg-purple-"],
+.app-shell [class*="bg-violet-"],
+.app-shell [class*="bg-fuchsia-"] {
+  background-color: var(--theme-surface-elevated) !important;
+  color: var(--theme-text) !important;
+}
+
+.app-shell [class*="bg-amber-950"],
+.app-shell [class*="bg-amber-900"] {
+  background-color: rgb(245 158 11 / 0.12) !important;
 }
 
 .app-shell input,
 .app-shell select,
 .app-shell textarea {
-  background-color: var(--theme-surface) !important;
+  background-color: var(--theme-surface-elevated) !important;
   border-color: var(--theme-border) !important;
   color: var(--theme-text) !important;
 }
@@ -164,31 +240,96 @@ body,
   color: var(--theme-text-muted) !important;
 }
 
+.app-shell input:focus,
+.app-shell select:focus,
+.app-shell textarea:focus {
+  border-color: var(--theme-primary) !important;
+  box-shadow: 0 0 0 3px rgb(22 163 74 / 0.18) !important;
+  outline: none;
+}
+
 .app-shell button,
 .app-shell a {
   transition-duration: 180ms;
 }
 
 .app-shell button[class*="bg-gradient-to-r"],
+.app-shell button[class*="bg-cyan-500"],
 .app-shell button[class*="bg-cyan-600"],
+.app-shell button[class*="bg-blue-500"],
 .app-shell button[class*="bg-blue-600"],
-.app-shell button[class*="bg-indigo-600"] {
+.app-shell button[class*="bg-indigo-600"],
+.app-shell button[class*="bg-emerald-500"],
+.app-shell button[class*="bg-emerald-600"],
+.app-shell button[class*="bg-emerald-700"] {
   background-color: var(--theme-primary) !important;
   background-image: none !important;
   border-color: var(--theme-primary) !important;
   color: #ffffff !important;
 }
 
-.app-shell button[class*="bg-gradient-to-r"]:hover,
-.app-shell button[class*="bg-cyan-600"]:hover,
-.app-shell button[class*="bg-blue-600"]:hover,
-.app-shell button[class*="bg-indigo-600"]:hover {
+.app-shell button[class*="bg-cyan-"],
+.app-shell button[class*="bg-blue-"],
+.app-shell button[class*="bg-sky-"],
+.app-shell button[class*="bg-indigo-"],
+.app-shell button[class*="bg-emerald-"],
+.app-shell button[class*="bg-purple-"],
+.app-shell button[class*="bg-violet-"],
+.app-shell button[class*="bg-fuchsia-"],
+.app-shell button[class*="bg-gradient-"] {
+  background-color: var(--theme-primary) !important;
+  background-image: none !important;
+  border-color: var(--theme-primary) !important;
+  color: #ffffff !important;
+}
+
+.app-shell button[class*="bg-cyan-"]:hover,
+.app-shell button[class*="bg-blue-"]:hover,
+.app-shell button[class*="bg-sky-"]:hover,
+.app-shell button[class*="bg-indigo-"]:hover,
+.app-shell button[class*="bg-emerald-"]:hover,
+.app-shell button[class*="bg-purple-"]:hover,
+.app-shell button[class*="bg-violet-"]:hover,
+.app-shell button[class*="bg-fuchsia-"]:hover,
+.app-shell button[class*="bg-gradient-"]:hover {
   background-color: var(--theme-primary-hover) !important;
 }
 
-.app-shell button[class*="bg-emerald-600"],
-.app-shell button[class*="bg-emerald-500"],
-.app-shell button[class*="bg-emerald-700"],
+.app-shell [class*="border-cyan-"],
+.app-shell [class*="border-blue-"],
+.app-shell [class*="border-sky-"],
+.app-shell [class*="border-indigo-"],
+.app-shell [class*="border-teal-"],
+.app-shell [class*="border-emerald-"],
+.app-shell [class*="border-lime-"],
+.app-shell [class*="border-purple-"],
+.app-shell [class*="border-violet-"],
+.app-shell [class*="border-fuchsia-"],
+.app-shell [class*="border-slate-"],
+.app-shell [class*="border-gray-"] {
+  border-color: var(--theme-border) !important;
+}
+
+.app-shell [class*="shadow-cyan-"],
+.app-shell [class*="shadow-blue-"],
+.app-shell [class*="shadow-indigo-"],
+.app-shell [class*="shadow-purple-"],
+.app-shell [class*="shadow-emerald-"] {
+  --tw-shadow-color: #dce7d6 !important;
+}
+
+.app-shell button[class*="bg-gradient-to-r"]:hover,
+.app-shell button[class*="bg-cyan-500"]:hover,
+.app-shell button[class*="bg-cyan-600"]:hover,
+.app-shell button[class*="bg-blue-500"]:hover,
+.app-shell button[class*="bg-blue-600"]:hover,
+.app-shell button[class*="bg-indigo-600"]:hover,
+.app-shell button[class*="bg-emerald-500"]:hover,
+.app-shell button[class*="bg-emerald-600"]:hover,
+.app-shell button[class*="bg-emerald-700"]:hover {
+  background-color: var(--theme-primary-hover) !important;
+}
+
 .app-shell button[class*="bg-rose-"],
 .app-shell button[class*="bg-red-"],
 .app-shell button[class*="bg-purple-600"],
@@ -196,40 +337,272 @@ body,
   color: #ffffff !important;
 }
 
+.app-shell button[class*="bg-rose-"],
+.app-shell button[class*="bg-red-"] {
+  background-color: var(--theme-error) !important;
+  border-color: var(--theme-error) !important;
+}
+
+.app-shell button[class*="bg-amber-500"] {
+  background-color: var(--theme-warning) !important;
+  border-color: var(--theme-warning) !important;
+  color: #303830 !important;
+}
+
+/* Light green-and-white theme bridge for existing Tailwind colour utilities. */
+.app-shell [class*="bg-gradient-"] {
+  background-color: var(--theme-surface-elevated) !important;
+  background-image: linear-gradient(135deg, #f3f8ef, #eaf4e4) !important;
+}
+
+.app-shell button[class*="bg-gradient-"] {
+  background-color: var(--theme-primary) !important;
+  background-image: none !important;
+  color: #ffffff !important;
+}
+
+.app-shell button[class*="bg-cyan-"] [class~="text-white"],
+.app-shell button[class*="bg-blue-"] [class~="text-white"],
+.app-shell button[class*="bg-sky-"] [class~="text-white"],
+.app-shell button[class*="bg-indigo-"] [class~="text-white"],
+.app-shell button[class*="bg-emerald-"] [class~="text-white"],
+.app-shell button[class*="bg-purple-"] [class~="text-white"],
+.app-shell button[class*="bg-gradient-"] [class~="text-white"] {
+  color: #ffffff !important;
+}
+
+.app-shell button[class*="bg-"] [class*="text-white"] {
+  color: #ffffff !important;
+}
+
+.app-shell [class*="color-scheme:dark"] {
+  color-scheme: light !important;
+}
+
+.app-shell [class*="bg-rose-"],
+.app-shell [class*="bg-red-"],
+.app-shell [class*="bg-amber-"],
+.app-shell [class*="bg-orange-"] {
+  background-color: var(--theme-surface-elevated) !important;
+}
+
+.app-shell button[class*="bg-rose-"],
+.app-shell button[class*="bg-red-"],
+.app-shell button[class*="bg-amber-"],
+.app-shell button[class*="bg-orange-"] {
+  background-color: var(--theme-primary) !important;
+  border-color: var(--theme-primary) !important;
+  color: #ffffff !important;
+}
+
+.app-shell [class*="text-white"],
+.app-shell [class*="text-slate-100"],
+.app-shell [class*="text-slate-200"],
+.app-shell [class*="text-gray-100"],
+.app-shell [class*="text-gray-200"] {
+  color: var(--theme-text) !important;
+}
+
+.app-shell [class*="text-cyan-"],
+.app-shell [class*="text-blue-"],
+.app-shell [class*="text-sky-"],
+.app-shell [class*="text-indigo-"],
+.app-shell [class*="text-teal-"],
+.app-shell [class*="text-emerald-"],
+.app-shell [class*="text-lime-"],
+.app-shell [class*="text-purple-"],
+.app-shell [class*="text-violet-"],
+.app-shell [class*="text-fuchsia-"] {
+  color: var(--theme-primary) !important;
+}
+
+.app-shell [class*="border-cyan-"],
+.app-shell [class*="border-blue-"],
+.app-shell [class*="border-sky-"],
+.app-shell [class*="border-indigo-"],
+.app-shell [class*="border-teal-"],
+.app-shell [class*="border-emerald-"],
+.app-shell [class*="border-lime-"],
+.app-shell [class*="border-purple-"],
+.app-shell [class*="border-violet-"],
+.app-shell [class*="border-fuchsia-"],
+.app-shell [class*="border-rose-"],
+.app-shell [class*="border-red-"],
+.app-shell [class*="border-amber-"] {
+  border-color: var(--theme-border) !important;
+}
+
+.app-shell [class*="ring-cyan-"],
+.app-shell [class*="ring-blue-"],
+.app-shell [class*="ring-indigo-"],
+.app-shell [class*="ring-emerald-"],
+.app-shell [class*="accent-cyan-"] {
+  --tw-ring-color: var(--theme-primary) !important;
+  accent-color: var(--theme-primary) !important;
+}
+
+.app-shell [class*="shadow-cyan-"],
+.app-shell [class*="shadow-blue-"],
+.app-shell [class*="shadow-sky-"],
+.app-shell [class*="shadow-indigo-"],
+.app-shell [class*="shadow-purple-"],
+.app-shell [class*="shadow-emerald-"] {
+  --tw-shadow-color: #dce7d6 !important;
+}
+
+.admin-chat-page,
+.admin-chat-page [class*="bg-[#"] {
+  background-color: #ffffff !important;
+  color: #303830 !important;
+}
+
+.admin-chat-page [class*="bg-[#005c4b]"] {
+  background-color: #eaf4e4 !important;
+}
+
+.admin-chat-page [class*="bg-[#202c33]"],
+.admin-chat-page [class*="bg-[#2a3942]"] {
+  background-color: #f3f8ef !important;
+}
+
+.admin-chat-page [class*="bg-cyan-"],
+.admin-chat-page [class*="bg-indigo-"],
+.admin-chat-page [class*="bg-purple-"] {
+  background-color: #58a832 !important;
+  color: #ffffff !important;
+}
+
+.admin-chat-page [class*="bg-rose-"],
+.admin-chat-page [class*="bg-amber-"] {
+  background-color: #eaf4e4 !important;
+  color: #303830 !important;
+}
+
+.admin-chat-page [class*="text-white"],
+.admin-chat-page [class*="text-slate-100"],
+.admin-chat-page [class*="text-slate-200"] {
+  color: #303830 !important;
+}
+
+.admin-chat-page button[class*="bg-cyan-"] [class~="text-white"],
+.admin-chat-page button[class*="bg-indigo-"] [class~="text-white"],
+.admin-chat-page button[class*="bg-purple-"] [class~="text-white"] {
+  color: #ffffff !important;
+}
+
+.admin-chat-page [class*="text-cyan-"],
+.admin-chat-page [class*="text-indigo-"],
+.admin-chat-page [class*="text-emerald-"] {
+  color: #347a29 !important;
+}
+
+.admin-chat-page [class*="border-slate-"],
+.admin-chat-page [class*="border-cyan-"] {
+  border-color: #dce7d6 !important;
+}
+
+.admin-chat-page input {
+  background-color: #f3f8ef !important;
+  color: #303830 !important;
+}
+
+.vault-header-enter,
+.site-chrome {
+  background-color: #ffffff !important;
+  color: #303830 !important;
+  border-color: #dce7d6 !important;
+  box-shadow: 0 8px 24px rgb(48 56 48 / 0.07) !important;
+}
+
+.vault-header-enter [class*="bg-cyan-"],
+.vault-header-enter [class*="bg-blue-"],
+.vault-header-enter [class*="bg-indigo-"],
+.vault-header-enter [class*="bg-emerald-"] {
+  background-color: #58a832 !important;
+}
+
+.vault-header-enter [class*="text-white"],
+.vault-header-enter [class*="text-slate-100"],
+.vault-header-enter [class*="text-slate-200"] {
+  color: #303830 !important;
+}
+
+.vault-header-enter button[class*="bg-cyan-"],
+.vault-header-enter button[class*="bg-emerald-"] {
+  color: #ffffff !important;
+}
+
+.admin-chat-wallpaper {
+  background-image: radial-gradient(#dce7d6 0.6px, transparent 0.6px) !important;
+}
+
+.app-shell [class*="shadow-"] {
+  --tw-shadow-color: rgb(48 56 48 / 0.1) !important;
+}
+
 .app-shell .site-chrome {
   background-color: var(--theme-navy) !important;
-  border-color: rgb(148 163 184 / 0.2) !important;
-  color: #f8fafc !important;
+  border-color: var(--theme-border) !important;
+  color: var(--theme-text) !important;
 }
 
 .app-shell .site-chrome [class~="text-white"],
 .app-shell .site-chrome [class~="text-slate-100"],
 .app-shell .site-chrome [class~="text-slate-200"] {
-  color: #f8fafc !important;
+  color: var(--theme-text) !important;
 }
 
 .app-shell .site-chrome [class~="text-slate-300"],
 .app-shell .site-chrome [class~="text-slate-400"],
 .app-shell .site-chrome [class~="text-slate-500"] {
-  color: #cbd5e1 !important;
+  color: var(--theme-text-muted) !important;
 }
 
 .app-shell .site-chrome [class*="text-emerald-"] {
-  color: #9ec8e5 !important;
+  color: var(--theme-success) !important;
 }
 
 .app-shell .site-chrome [class*="bg-emerald-"] {
-  background-color: rgb(64 142 198 / 0.16) !important;
+  background-color: rgb(22 163 74 / 0.12) !important;
 }
 
 .app-shell .site-chrome [class*="border-emerald-"] {
-  border-color: rgb(96 165 250 / 0.35) !important;
+  border-color: rgb(5 150 105 / 0.35) !important;
 }
 
-.app-shell .site-chrome button[class*="bg-emerald-"] {
+.app-shell .site-chrome button[class*="bg-emerald-500"],
+.app-shell .site-chrome button[class*="bg-emerald-600"],
+.app-shell .site-chrome button[class*="bg-emerald-700"] {
   background-color: var(--theme-primary) !important;
   border-color: var(--theme-primary) !important;
   color: #ffffff !important;
+}
+
+.app-shell .site-chrome button[class*="bg-emerald-500"]:hover,
+.app-shell .site-chrome button[class*="bg-emerald-600"]:hover,
+.app-shell .site-chrome button[class*="bg-emerald-700"]:hover {
+  background-color: var(--theme-primary-hover) !important;
+}
+
+.admin-chat-page [class*="bg-[#005c4b]"] {
+  background-color: rgb(22 163 74 / 0.22) !important;
+}
+
+.admin-chat-page [class*="bg-[#202c33]"] {
+  background-color: var(--theme-surface-elevated) !important;
+}
+
+.admin-chat-page [class*="bg-[#111b20]"] {
+  background-color: var(--theme-surface) !important;
+}
+
+.app-shell a:hover {
+  color: var(--theme-primary-hover);
+}
+
+.app-shell :focus-visible {
+  outline: 2px solid var(--theme-primary);
+  outline-offset: 2px;
 }
 
 @layer utilities {
@@ -243,8 +616,8 @@ body,
 
   .cyber-grid {
     background-image:
-      linear-gradient(to right, rgb(64 142 198 / 0.045) 1px, transparent 1px),
-      linear-gradient(to bottom, rgb(64 142 198 / 0.045) 1px, transparent 1px);
+      linear-gradient(to right, rgb(22 163 74 / 0.045) 1px, transparent 1px),
+      linear-gradient(to bottom, rgb(22 163 74 / 0.045) 1px, transparent 1px);
     background-size: 40px 40px;
   }
 
@@ -263,8 +636,8 @@ body,
     background: linear-gradient(
       180deg,
       transparent 0%,
-      rgb(64 142 198 / 0.04) 50%,
-      rgb(255 255 255 / 0.35) 80%,
+      rgb(22 163 74 / 0.05) 50%,
+      rgb(255 255 255 / 0.14) 80%,
       transparent 100%
     );
     pointer-events: none;
@@ -287,7 +660,7 @@ body,
     position: absolute;
     width: 7px;
     height: 7px;
-    border-color: rgb(64 142 198 / 0.45);
+    border-color: rgb(22 163 74 / 0.45);
     transition: border-color 0.2s ease;
     pointer-events: none;
   }
@@ -583,12 +956,12 @@ body,
 
 .app-shell select:hover {
   transform: translateY(-1px);
-  border-color: rgb(34 211 238 / 0.55);
+  border-color: rgb(22 163 74 / 0.6);
 }
 
 .app-shell select:focus {
   transform: translateY(-1px) scale(1.01);
-  box-shadow: 0 0 0 3px rgb(34 211 238 / 0.12), 0 8px 24px rgb(8 47 73 / 0.28);
+  box-shadow: 0 0 0 3px rgb(22 163 74 / 0.18), 0 8px 24px rgb(0 0 0 / 0.28);
 }
 
 .vault-dropdown-panel {
@@ -640,10 +1013,90 @@ body,
 }
 
 .admin-chat-wallpaper {
-  background-color: #0b141a;
-  background-image: radial-gradient(rgba(72, 94, 106, 0.12) 1px, transparent 1px), radial-gradient(rgba(72, 94, 106, 0.08) 1px, transparent 1px);
+  background-color: var(--theme-background);
+  background-image: radial-gradient(rgb(22 163 74 / 0.08) 1px, transparent 1px), radial-gradient(rgb(167 184 172 / 0.045) 1px, transparent 1px);
   background-position: 0 0, 18px 18px;
   background-size: 36px 36px;
+}
+
+.scroll-network-section {
+  min-height: 150vh;
+  scroll-margin-top: 5rem;
+}
+
+.scroll-network-stage {
+  width: min(100%, 56rem);
+  height: clamp(18rem, 58vw, 32rem);
+  max-height: 32rem;
+  position: sticky;
+  top: 16vh;
+  isolation: isolate;
+}
+
+.scroll-network-node {
+  position: absolute;
+  z-index: 2;
+  display: flex;
+  width: 6rem;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--theme-text-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.62rem;
+  text-align: center;
+  transform: translate(-50%, -50%);
+}
+
+.scroll-network-node__shape {
+  display: grid;
+  width: 2.8rem;
+  height: 2.8rem;
+  place-items: center;
+  border: 1px solid #dce7d6;
+  border-radius: 1rem;
+  background: #ffffff;
+  color: #347a29;
+  box-shadow: 0 8px 24px rgb(48 56 48 / 0.1);
+}
+
+.scroll-network-node__shape svg {
+  width: 1.15rem;
+  height: 1.15rem;
+}
+
+.scroll-node--top { left: 50%; top: 13.4%; }
+.scroll-node--right { left: 85.7%; top: 32.9%; }
+.scroll-node--bottom-right { left: 76.4%; top: 86.6%; }
+.scroll-node--bottom-left { left: 23.6%; top: 86.6%; }
+.scroll-node--left { left: 14.3%; top: 32.9%; }
+
+.scroll-network-hub {
+  width: clamp(4.6rem, 10vw, 6.2rem);
+  height: clamp(4.6rem, 10vw, 6.2rem);
+  transform-origin: center;
+}
+
+@media (max-width: 480px) {
+  .scroll-network-section {
+    min-height: 128vh;
+  }
+
+  .scroll-network-stage {
+    height: 19rem;
+    top: 13vh;
+  }
+
+  .scroll-network-node {
+    width: 4.4rem;
+    font-size: 0.55rem;
+  }
+
+  .scroll-network-node__shape {
+    width: 2.45rem;
+    height: 2.45rem;
+    border-radius: 0.85rem;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -655,4 +1108,74 @@ body,
     scroll-behavior: auto !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/* Final palette coverage for less common status and focus utilities. */
+.app-shell [class*="bg-yellow-"],
+.app-shell [class*="bg-orange-"],
+.app-shell [class*="bg-pink-"] {
+  background-color: var(--theme-surface-elevated) !important;
+  background-image: none !important;
+}
+
+.app-shell button[class*="bg-yellow-"],
+.app-shell button[class*="bg-orange-"],
+.app-shell button[class*="bg-pink-"] {
+  background-color: var(--theme-primary) !important;
+  color: #ffffff !important;
+}
+
+.app-shell [class*="text-yellow-"],
+.app-shell [class*="text-orange-"],
+.app-shell [class*="text-pink-"] {
+  color: var(--theme-primary-hover) !important;
+}
+
+.app-shell [class*="border-yellow-"],
+.app-shell [class*="border-orange-"],
+.app-shell [class*="border-pink-"] {
+  border-color: var(--theme-border) !important;
+}
+
+.app-shell [class*="text-slate-950"],
+.app-shell [class*="text-gray-950"],
+.app-shell [class*="text-zinc-950"] {
+  color: var(--theme-text) !important;
+}
+
+.app-shell [class*="ring-yellow-"],
+.app-shell [class*="ring-orange-"],
+.app-shell [class*="ring-pink-"],
+.app-shell [class*="accent-yellow-"] {
+  --tw-ring-color: var(--theme-primary) !important;
+  accent-color: var(--theme-primary) !important;
+}
+
+/* Soft emerald-lime halo for primary actions and active controls. */
+.app-shell button[class*="bg-cyan-"],
+.app-shell button[class*="bg-blue-"],
+.app-shell button[class*="bg-indigo-"],
+.app-shell button[class*="bg-emerald-"],
+.app-shell button[class*="bg-purple-"],
+.app-shell button[class*="bg-gradient-"] {
+  box-shadow: 0 0 0 1px rgb(114 185 75 / 0.12), 0 3px 12px rgb(52 122 41 / 0.14) !important;
+}
+
+.app-shell button[class*="bg-cyan-"]:hover,
+.app-shell button[class*="bg-blue-"]:hover,
+.app-shell button[class*="bg-indigo-"]:hover,
+.app-shell button[class*="bg-emerald-"]:hover,
+.app-shell button[class*="bg-purple-"]:hover,
+.app-shell button[class*="bg-gradient-"]:hover {
+  box-shadow: 0 0 0 1px rgb(114 185 75 / 0.2), 0 0 14px rgb(88 168 50 / 0.22) !important;
+}
+
+.app-shell button[class*="ring-emerald-"],
+.app-shell button[aria-current="page"],
+.app-shell button[aria-pressed="true"] {
+  box-shadow: 0 0 0 1px rgb(114 185 75 / 0.14), 0 0 10px rgb(88 168 50 / 0.12) !important;
+}
+
+.app-shell button:disabled {
+  box-shadow: none !important;
 }
