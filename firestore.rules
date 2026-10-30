@@ -83,24 +83,24 @@ service cloud.firestore {
         data.keys().hasOnly(['userId', 'email', 'displayName', 'photoURL', 'plan', 'planDuration', 'extraSlots', 'maxCredentialSlots', 'paymentStatus', 'paymentRef', 'paymentCurrency', 'senderName', 'bankUsed', 'role', 'approvedAt', 'expiresAt', 'isExpired', 'isBanned', 'bannedReason', 'bannedAt', 'bannedBy', 'createdAt', 'updatedAt']) &&
         data.userId is string && (data.userId == request.auth.uid || isAdmin()) &&
         data.email is string && data.email.size() <= 320 &&
-        (!('displayName' in data.keys()) || (data.displayName is string && data.displayName.size() <= 120)) &&
-        (!('photoURL' in data.keys()) || (data.photoURL is string && data.photoURL.size() <= 1024)) &&
-        (!('plan' in data.keys()) || (data.plan in ['free', 'paid', 'unlimited', 'biweekly', 'monthly', 'yearly'])) &&
-        (!('planDuration' in data.keys()) || (data.planDuration in ['biweekly', 'monthly', 'yearly'])) &&
-        (!('extraSlots' in data.keys()) || (data.extraSlots is number && data.extraSlots >= 0 && data.extraSlots <= 999999)) &&
-        (!('maxCredentialSlots' in data.keys()) || (data.maxCredentialSlots is number && data.maxCredentialSlots >= 0 && data.maxCredentialSlots <= 999999)) &&
-        (!('approvedAt' in data.keys()) || (data.approvedAt is number)) &&
-        (!('expiresAt' in data.keys()) || (data.expiresAt is number)) &&
-        (!('isExpired' in data.keys()) || (data.isExpired is bool)) &&
-        (!('isBanned' in data.keys()) || (data.isBanned is bool)) &&
-        (!('bannedReason' in data.keys()) || (data.bannedReason is string && data.bannedReason.size() <= 500)) &&
-        (!('bannedBy' in data.keys()) || (data.bannedBy is string && data.bannedBy.size() <= 120)) &&
-        (!('paymentStatus' in data.keys()) || (data.paymentStatus in ['none', 'pending', 'verified'])) &&
-        (!('paymentRef' in data.keys()) || (data.paymentRef is string && data.paymentRef.size() <= 200)) &&
-        (!('paymentCurrency' in data.keys()) || (data.paymentCurrency in ['USD', 'NGN'])) &&
-        (!('senderName' in data.keys()) || (data.senderName is string && data.senderName.size() <= 120)) &&
-        (!('bankUsed' in data.keys()) || (data.bankUsed is string && data.bankUsed.size() <= 100)) &&
-        (!('role' in data.keys()) || (data.role in ['admin', 'user'])) &&
+        (!(data.keys().hasAny(['displayName'])) || (data.displayName is string && data.displayName.size() <= 120)) &&
+        (!(data.keys().hasAny(['photoURL'])) || (data.photoURL is string && data.photoURL.size() <= 1024)) &&
+        (!(data.keys().hasAny(['plan'])) || (data.plan in ['free', 'paid', 'unlimited', 'biweekly', 'monthly', 'yearly'])) &&
+        (!(data.keys().hasAny(['planDuration'])) || (data.planDuration in ['biweekly', 'monthly', 'yearly'])) &&
+        (!(data.keys().hasAny(['extraSlots'])) || (data.extraSlots is number && data.extraSlots >= 0 && data.extraSlots <= 999999)) &&
+        (!(data.keys().hasAny(['maxCredentialSlots'])) || (data.maxCredentialSlots is number && data.maxCredentialSlots >= 0 && data.maxCredentialSlots <= 999999)) &&
+        (!(data.keys().hasAny(['approvedAt'])) || (data.approvedAt is number)) &&
+        (!(data.keys().hasAny(['expiresAt'])) || (data.expiresAt is number)) &&
+        (!(data.keys().hasAny(['isExpired'])) || (data.isExpired is bool)) &&
+        (!(data.keys().hasAny(['isBanned'])) || (data.isBanned is bool)) &&
+        (!(data.keys().hasAny(['bannedReason'])) || (data.bannedReason is string && data.bannedReason.size() <= 500)) &&
+        (!(data.keys().hasAny(['bannedBy'])) || (data.bannedBy is string && data.bannedBy.size() <= 120)) &&
+        (!(data.keys().hasAny(['paymentStatus'])) || (data.paymentStatus in ['none', 'pending', 'verified'])) &&
+        (!(data.keys().hasAny(['paymentRef'])) || (data.paymentRef is string && data.paymentRef.size() <= 200)) &&
+        (!(data.keys().hasAny(['paymentCurrency'])) || (data.paymentCurrency in ['USD', 'NGN'])) &&
+        (!(data.keys().hasAny(['senderName'])) || (data.senderName is string && data.senderName.size() <= 120)) &&
+        (!(data.keys().hasAny(['bankUsed'])) || (data.bankUsed is string && data.bankUsed.size() <= 100)) &&
+        (!(data.keys().hasAny(['role'])) || (data.role in ['admin', 'user'])) &&
         data.createdAt is timestamp &&
         data.updatedAt is timestamp;
     }
@@ -117,20 +117,20 @@ service cloud.firestore {
         data.category in ['social', 'work', 'personal', 'finance', 'document', 'other'] &&
         data.favorite is bool &&
         data.createdAt is timestamp && data.updatedAt is timestamp &&
-        (!('service' in data.keys()) || (data.service is string && data.service.size() <= 100)) &&
-        (!('username' in data.keys()) || (data.username is string && data.username.size() <= 320)) &&
-        (!('password' in data.keys()) || (data.password is string && data.password.size() <= 500)) &&
-        (!('url' in data.keys()) || (data.url is string && data.url.size() <= 1024)) &&
-        (!('notes' in data.keys()) || (data.notes is string && data.notes.size() <= 5000)) &&
-        (!('imageUrl' in data.keys()) || (data.imageUrl is string && data.imageUrl.size() <= 2048)) &&
-        (!('imageName' in data.keys()) || (data.imageName is string && data.imageName.size() <= 255)) &&
-        (!('imageSize' in data.keys()) || (data.imageSize is number && data.imageSize >= 0 && data.imageSize <= 52428800)) &&
-        (!('imageType' in data.keys()) || (data.imageType is string && data.imageType.size() <= 100)) &&
-        (!('imageIv' in data.keys()) || (data.imageIv is string && data.imageIv.size() == 16)) &&
-        (!('encryptedData' in data.keys()) || (
+        data.get('service', '') is string && data.get('service', '').size() <= 100 &&
+        (!(data.keys().hasAny(['username'])) || (data.username is string && data.username.size() <= 320)) &&
+        (!(data.keys().hasAny(['password'])) || (data.password is string && data.password.size() <= 500)) &&
+        (!(data.keys().hasAny(['url'])) || (data.url is string && data.url.size() <= 1024)) &&
+        (!(data.keys().hasAny(['notes'])) || (data.notes is string && data.notes.size() <= 5000)) &&
+        (!(data.keys().hasAny(['imageUrl'])) || (data.imageUrl is string && data.imageUrl.size() <= 2048)) &&
+        (!(data.keys().hasAny(['imageName'])) || (data.imageName is string && data.imageName.size() <= 255)) &&
+        (!(data.keys().hasAny(['imageSize'])) || (data.imageSize is number && data.imageSize >= 0 && data.imageSize <= 52428800)) &&
+        (!(data.keys().hasAny(['imageType'])) || (data.imageType is string && data.imageType.size() <= 100)) &&
+        (!(data.keys().hasAny(['imageIv'])) || (data.imageIv is string && data.imageIv.size() == 16)) &&
+        (!(data.keys().hasAny(['encryptedData'])) || (
           data.encryptedData is map &&
           data.title == 'Encrypted item' &&
-          !data.keys().hasAny(['service', 'username', 'password', 'url', 'notes', 'imageName']) &&
+          !(data.keys().hasAny(['service', 'username', 'password', 'url', 'notes', 'imageName'])) &&
           data.encryptedData.keys().hasOnly(['version', 'iv', 'ciphertext']) &&
           data.encryptedData.version == 1 &&
           data.encryptedData.iv is string && data.encryptedData.iv.size() == 16 &&
@@ -144,14 +144,14 @@ service cloud.firestore {
         data.keys().hasOnly(['id', 'userId', 'userEmail', 'userName', 'type', 'subject', 'message', 'status', 'isRedirectedToOwner', 'redirectedBy', 'redirectedAt', 'adminNotes', 'createdAt']) &&
         data.userId is string && data.userId == request.auth.uid &&
         data.userEmail is string && data.userEmail.size() <= 320 &&
-        (!('userName' in data.keys()) || (data.userName is string && data.userName.size() <= 120)) &&
+        (!(data.keys().hasAny(['userName'])) || (data.userName is string && data.userName.size() <= 120)) &&
         data.type in ['suggestion', 'complaint', 'inquiry', 'payment'] &&
         data.subject is string && data.subject.size() >= 1 && data.subject.size() <= 200 &&
         data.message is string && data.message.size() >= 1 && data.message.size() <= 5000 &&
-        (!('status' in data.keys()) || data.status in ['pending', 'reviewed', 'resolved']) &&
-        (!('isRedirectedToOwner' in data.keys()) || data.isRedirectedToOwner is bool) &&
-        (!('redirectedBy' in data.keys()) || (data.redirectedBy is string && data.redirectedBy.size() <= 120)) &&
-        (!('adminNotes' in data.keys()) || (data.adminNotes is string && data.adminNotes.size() <= 2000)) &&
+        (!(data.keys().hasAny(['status'])) || data.status in ['pending', 'reviewed', 'resolved']) &&
+        (!(data.keys().hasAny(['isRedirectedToOwner'])) || data.isRedirectedToOwner is bool) &&
+        (!(data.keys().hasAny(['redirectedBy'])) || (data.redirectedBy is string && data.redirectedBy.size() <= 120)) &&
+        (!(data.keys().hasAny(['adminNotes'])) || (data.adminNotes is string && data.adminNotes.size() <= 2000)) &&
         data.createdAt is timestamp;
     }
 
@@ -183,7 +183,7 @@ service cloud.firestore {
           ]))
         ) &&
         // Unbanning rule: if account is currently banned, only superadmin can unban it!
-        (!('isBanned' in existing()) || existing().isBanned == false || incoming().isBanned == true || isSuperAdmin());
+        (!existing().keys().hasAny(['isBanned']) || existing().isBanned == false || incoming().isBanned == true || isSuperAdmin());
       allow delete: if false;
 
       match /security/{securityDoc} {
