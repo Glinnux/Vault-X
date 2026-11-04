@@ -136,7 +136,6 @@ const localServiceAccountPath = process.env.GOOGLE_APPLICATION_CREDENTIALS ||
   path.join(process.env.USERPROFILE || '', 'Documents', 'VaultX', 'service-account.json');
 const SUPER_ADMIN_EMAILS = new Set([
   'oluwolefaith92@gmail.com',
-  'faitholuwole6@gmail.com',
 ]);
 
 // Firebase Admin is initialized only on the trusted server. The service-account
@@ -1107,7 +1106,7 @@ function getFallbackResponse(query: string): string {
 - **Free Plan**: Every normal user is allotted **10 credential slots** free of charge.
 - **Paid Upgrade (+20 Slots)**: You can allot **20 additional slots** (for **30 total credential slots**) by paying **$4.88 USD** or **₦6,500 Naira**.
 - **Separate Payment Page**: Clicking the **"Upgrade (+20 Slots)"** button in the header or the **Side Box** redirects you to a dedicated page containing the official bank account number, transfer details, and proof verification.
-- **How to Pay**: Transfer $4.88 or ₦6,500 to the official bank account displayed on that page, enter your transaction reference, and your slots will unlock immediately!`;
+- **How to Pay**: Transfer ₦6,500 to the official bank account displayed on that page, enter your transaction reference, and your slots will unlock immediately!`;
   }
 
   // General fallback
