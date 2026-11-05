@@ -96,7 +96,31 @@ export const VaultChatbot: React.FC<VaultChatbotProps> = ({
   const [copiedEmail, setCopiedEmail] = useState(false);
   const [inputMessage, setInputMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [visibleViewport, setVisibleViewport] = useState<{ height: number; bottomInset: number } | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const viewport = window.visualViewport;
+    if (!viewport) return;
+
+    const updateViewport = () => {
+      setVisibleViewport({
+        height: viewport.height,
+        bottomInset: Math.max(0, window.innerHeight - viewport.offsetTop - viewport.height),
+      });
+    };
+
+    updateViewport();
+    window.addEventListener('resize', updateViewport);
+    viewport.addEventListener('resize', updateViewport);
+    viewport.addEventListener('scroll', updateViewport);
+
+    return () => {
+      window.removeEventListener('resize', updateViewport);
+      viewport.removeEventListener('resize', updateViewport);
+      viewport.removeEventListener('scroll', updateViewport);
+    };
+  }, []);
 
   // Initial greeting
   const [messages, setMessages] = useState<ChatMessage[]>(() => [
@@ -145,6 +169,13 @@ export const VaultChatbot: React.FC<VaultChatbotProps> = ({
   };
 
   const gmailHelpUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(supportEmail)}&su=${encodeURIComponent('Vault X Help Request')}`;
+  const keyboardOpen = Boolean(visibleViewport && visibleViewport.bottomInset > 80);
+  const chatWindowStyle = keyboardOpen && visibleViewport
+    ? { maxHeight: `${Math.max(180, visibleViewport.height - 32)}px` }
+    : undefined;
+  const chatContainerStyle = keyboardOpen && visibleViewport
+    ? { bottom: `${visibleViewport.bottomInset + 16}px` }
+    : undefined;
 
   const handleSendMessage = async (userPromptText?: string) => {
     const textToSend = (userPromptText || inputMessage).trim();
@@ -263,7 +294,7 @@ export const VaultChatbot: React.FC<VaultChatbotProps> = ({
   };
 
   return (
-    <div className="fixed bottom-20 right-3 sm:bottom-6 sm:right-6 z-50 font-sans">
+    <div className="fixed bottom-20 right-3 sm:bottom-6 sm:right-6 z-50 font-sans" style={chatContainerStyle}>
       <AnimatePresence>
         {!isOpen ? (
           /* Floating Trigger Beacon */
@@ -295,6 +326,7 @@ export const VaultChatbot: React.FC<VaultChatbotProps> = ({
             exit={{ opacity: 0, y: 20, scale: 0.95 }}
             transition={{ duration: 0.2 }}
             className="w-[calc(100vw-2.5rem)] sm:w-[420px] max-w-[460px] h-[580px] max-h-[85vh] flex flex-col bg-[#0b101c]/95 border border-cyan-500/40 rounded-2xl shadow-2xl shadow-cyan-950/70 backdrop-blur-xl tech-corners overflow-hidden"
+            style={chatWindowStyle}
           >
             {/* Header */}
             <div className="flex items-center justify-between px-4 py-3 bg-slate-900/80 border-b border-cyan-500/20">
