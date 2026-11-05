@@ -47,11 +47,11 @@ export const AuthModal: React.FC = () => {
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [termsError, setTermsError] = useState<string | null>(null);
 
-  const requiresTerms = mode === 'signin' || mode === 'signup';
+  const requiresTerms = mode === 'signup';
 
   const requireTermsAgreement = () => {
-    if (requiresTerms && !termsAccepted) {
-      setTermsError('Read the Terms and Conditions and tick the agreement box before continuing.');
+    if (mode === 'signup' && !termsAccepted) {
+      setTermsError('Read the Terms and Conditions and tick the agreement box before creating your account.');
       return false;
     }
     return true;
@@ -210,9 +210,9 @@ export const AuthModal: React.FC = () => {
             <div className="flex items-start gap-2">
               <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" />
               <div className="min-w-0 flex-1">
-                <p className="text-xs font-bold uppercase tracking-wide text-amber-200">Terms required before authentication</p>
+                <p className="text-xs font-bold uppercase tracking-wide text-amber-200">Terms required before account creation</p>
                 <p className="mt-1 text-[11px] leading-relaxed text-amber-100/80">
-                  You must read the Terms and Conditions and confirm your agreement before Vault X will allow sign-in or account creation.
+                  New accounts must read the Terms and Conditions and confirm agreement before registration. Existing users can sign in without this step.
                 </p>
                 <button
                   type="button"
