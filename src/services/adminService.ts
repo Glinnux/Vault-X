@@ -13,7 +13,7 @@ import {
   orderBy,
   serverTimestamp,
 } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from '../lib/firebase';
+import { auth, db, handleFirestoreError, OperationType } from '../lib/firebase';
 import {
   UserAccount,
   AdminRecord,
@@ -25,8 +25,98 @@ import {
 export const ADMIN_EMAIL = 'oluwolefaith92@gmail.com';
 export const SUPER_ADMIN_EMAILS = [
   'oluwolefaith92@gmail.com',
-  'faitholuwole6@gmail.com',
 ];
+
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
+
+export type AdminNotificationCategory = 'admin_activity' | 'payments' | 'support' | 'recovery';
+export type AdminNotificationPreferences = Record<AdminNotificationCategory, boolean>;
+
+export interface AdminNotificationRecipient {
+  userId: string;
+  email: string;
+  displayName: string;
+  categories: AdminNotificationPreferences;
+}
+
+interface AdminNotificationApiResponse {
+  admins?: AdminNotificationRecipient[];
+  error?: string;
+  success?: boolean;
+  sent?: boolean;
+  message?: string;
+}
+
+export type AdminActivityAction =
+  | 'subscription_approved'
+  | 'subscription_extended'
+  | 'subscription_expired'
+  | 'subscription_reset'
+  | 'unlimited_slots_granted'
+  | 'user_banned'
+  | 'user_unbanned'
+  | 'admin_appointed'
+  | 'admin_revoked'
+  | 'admin_permissions_updated'
+  | 'ticket_status_changed'
+  | 'suggestion_redirected';
+
+async function getNotificationAuthHeaders(): Promise<Record<string, string>> {
+  const token = await auth.currentUser?.getIdToken();
+  if (!token) throw new Error('You must be signed in to manage email notifications.');
+  return { Authorization: `Bearer ${token}` };
+}
+
+async function readNotificationResponse(response: Response): Promise<AdminNotificationApiResponse> {
+  const data = await response.json().catch(() => ({})) as AdminNotificationApiResponse;
+  if (!response.ok) throw new Error(data.error || 'Email notification request failed.');
+  return data;
+}
+
+export async function fetchAdminNotificationRecipients(): Promise<AdminNotificationRecipient[]> {
+  const response = await fetch(`${API_BASE_URL}/api/admin/notification-preferences`, {
+    headers: await getNotificationAuthHeaders(),
+  });
+  const data = await readNotificationResponse(response);
+  if (!Array.isArray(data.admins)) throw new Error('The server returned invalid notification settings.');
+  return data.admins;
+}
+
+export async function saveAdminNotificationPreferences(
+  userId: string,
+  categories: AdminNotificationPreferences
+): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/api/admin/notification-preferences`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(await getNotificationAuthHeaders()),
+    },
+    body: JSON.stringify({ userId, categories }),
+  });
+  await readNotificationResponse(response);
+}
+
+export async function sendAdminActivityNotification(data: {
+  action: AdminActivityAction;
+  targetUid: string;
+  targetEmail?: string;
+  summary: string;
+}): Promise<{ sent: boolean; message: string }> {
+  const response = await fetch(`${API_BASE_URL}/api/admin/activity-notification`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(await getNotificationAuthHeaders()),
+    },
+    body: JSON.stringify(data),
+  });
+  const result = await readNotificationResponse(response);
+  if (typeof result.sent !== 'boolean' || typeof result.message !== 'string') {
+    throw new Error('The server returned an invalid admin notification status.');
+  }
+  return { sent: result.sent, message: result.message };
+}
 
 const NO_ADMIN_PERMISSIONS: AdminPermissions = {
   viewFullUserInfo: false,

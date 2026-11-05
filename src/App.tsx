@@ -448,6 +448,7 @@ function VaultApp() {
             userEmail={user.email}
             userUid={user.uid}
             onOpenGuide={() => setIsChatbotOpen(true)}
+            onToast={showToast}
           />
         )}
 

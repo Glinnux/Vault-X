@@ -2,19 +2,19 @@
 
 :root {
   color-scheme: light;
-  --theme-background: #f3f8ef;
+  --theme-background: #f6f8f5;
   --theme-navy: #ffffff;
   --theme-surface: #ffffff;
-  --theme-surface-elevated: #eaf4e4;
-  --theme-primary: #58a832;
-  --theme-primary-hover: #72b94b;
-  --theme-accent: #72b94b;
-  --theme-text: #303830;
-  --theme-text-muted: #788078;
-  --theme-border: #dce7d6;
-  --theme-success: #347a29;
-  --theme-warning: #788078;
-  --theme-error: #303830;
+  --theme-surface-elevated: #eef4ef;
+  --theme-primary: #15803d;
+  --theme-primary-hover: #16a34a;
+  --theme-accent: #16a34a;
+  --theme-text: #18251d;
+  --theme-text-muted: #58685d;
+  --theme-border: #d7e1d8;
+  --theme-success: #166534;
+  --theme-warning: #92400e;
+  --theme-error: #b42318;
 }
 
 html {
@@ -35,8 +35,8 @@ body {
 }
 
 ::selection {
-  background: #eaf4e4;
-  color: #303830;
+  background: #eef4ef;
+  color: #18251d;
 }
 
 /* Keep vault contents out of browser print/PDF output. Operating systems can
@@ -201,7 +201,7 @@ body,
 
 .app-shell [class*="border-rose-"],
 .app-shell [class*="border-red-"] {
-  border-color: rgb(239 68 68 / 0.48) !important;
+  border-color: rgb(180 35 24 / 0.48) !important;
 }
 
 .app-shell [class*="bg-rose-"],
@@ -212,7 +212,7 @@ body,
 .app-shell [class*="border-purple-"],
 .app-shell [class*="border-violet-"],
 .app-shell [class*="border-fuchsia-"] {
-  border-color: rgb(5 150 105 / 0.45) !important;
+  border-color: rgb(21 128 61 / 0.45) !important;
 }
 
 .app-shell [class*="bg-purple-"],
@@ -315,7 +315,7 @@ body,
 .app-shell [class*="shadow-indigo-"],
 .app-shell [class*="shadow-purple-"],
 .app-shell [class*="shadow-emerald-"] {
-  --tw-shadow-color: #dce7d6 !important;
+  --tw-shadow-color: #d7e1d8 !important;
 }
 
 .app-shell button[class*="bg-gradient-to-r"]:hover,
@@ -346,13 +346,13 @@ body,
 .app-shell button[class*="bg-amber-500"] {
   background-color: var(--theme-warning) !important;
   border-color: var(--theme-warning) !important;
-  color: #303830 !important;
+  color: #18251d !important;
 }
 
 /* Light green-and-white theme bridge for existing Tailwind colour utilities. */
 .app-shell [class*="bg-gradient-"] {
   background-color: var(--theme-surface-elevated) !important;
-  background-image: linear-gradient(135deg, #f3f8ef, #eaf4e4) !important;
+  background-image: linear-gradient(135deg, #f6f8f5, #eef4ef) !important;
 }
 
 .app-shell button[class*="bg-gradient-"] {
@@ -447,41 +447,41 @@ body,
 .app-shell [class*="shadow-indigo-"],
 .app-shell [class*="shadow-purple-"],
 .app-shell [class*="shadow-emerald-"] {
-  --tw-shadow-color: #dce7d6 !important;
+  --tw-shadow-color: #d7e1d8 !important;
 }
 
 .admin-chat-page,
 .admin-chat-page [class*="bg-[#"] {
   background-color: #ffffff !important;
-  color: #303830 !important;
+  color: #18251d !important;
 }
 
 .admin-chat-page [class*="bg-[#005c4b]"] {
-  background-color: #eaf4e4 !important;
+  background-color: #eef4ef !important;
 }
 
 .admin-chat-page [class*="bg-[#202c33]"],
 .admin-chat-page [class*="bg-[#2a3942]"] {
-  background-color: #f3f8ef !important;
+  background-color: #f6f8f5 !important;
 }
 
 .admin-chat-page [class*="bg-cyan-"],
 .admin-chat-page [class*="bg-indigo-"],
 .admin-chat-page [class*="bg-purple-"] {
-  background-color: #58a832 !important;
+  background-color: #15803d !important;
   color: #ffffff !important;
 }
 
 .admin-chat-page [class*="bg-rose-"],
 .admin-chat-page [class*="bg-amber-"] {
-  background-color: #eaf4e4 !important;
-  color: #303830 !important;
+  background-color: #eef4ef !important;
+  color: #18251d !important;
 }
 
 .admin-chat-page [class*="text-white"],
 .admin-chat-page [class*="text-slate-100"],
 .admin-chat-page [class*="text-slate-200"] {
-  color: #303830 !important;
+  color: #18251d !important;
 }
 
 .admin-chat-page button[class*="bg-cyan-"] [class~="text-white"],
@@ -493,24 +493,24 @@ body,
 .admin-chat-page [class*="text-cyan-"],
 .admin-chat-page [class*="text-indigo-"],
 .admin-chat-page [class*="text-emerald-"] {
-  color: #347a29 !important;
+  color: #166534 !important;
 }
 
 .admin-chat-page [class*="border-slate-"],
 .admin-chat-page [class*="border-cyan-"] {
-  border-color: #dce7d6 !important;
+  border-color: #d7e1d8 !important;
 }
 
 .admin-chat-page input {
-  background-color: #f3f8ef !important;
-  color: #303830 !important;
+  background-color: #f6f8f5 !important;
+  color: #18251d !important;
 }
 
 .vault-header-enter,
 .site-chrome {
   background-color: #ffffff !important;
-  color: #303830 !important;
-  border-color: #dce7d6 !important;
+  color: #18251d !important;
+  border-color: #d7e1d8 !important;
   box-shadow: 0 8px 24px rgb(48 56 48 / 0.07) !important;
 }
 
@@ -518,13 +518,13 @@ body,
 .vault-header-enter [class*="bg-blue-"],
 .vault-header-enter [class*="bg-indigo-"],
 .vault-header-enter [class*="bg-emerald-"] {
-  background-color: #58a832 !important;
+  background-color: #15803d !important;
 }
 
 .vault-header-enter [class*="text-white"],
 .vault-header-enter [class*="text-slate-100"],
 .vault-header-enter [class*="text-slate-200"] {
-  color: #303830 !important;
+  color: #18251d !important;
 }
 
 .vault-header-enter button[class*="bg-cyan-"],
@@ -533,7 +533,7 @@ body,
 }
 
 .admin-chat-wallpaper {
-  background-image: radial-gradient(#dce7d6 0.6px, transparent 0.6px) !important;
+  background-image: radial-gradient(#d7e1d8 0.6px, transparent 0.6px) !important;
 }
 
 .app-shell [class*="shadow-"] {
@@ -567,7 +567,7 @@ body,
 }
 
 .app-shell .site-chrome [class*="border-emerald-"] {
-  border-color: rgb(5 150 105 / 0.35) !important;
+  border-color: rgb(21 128 61 / 0.35) !important;
 }
 
 .app-shell .site-chrome button[class*="bg-emerald-500"],
@@ -1053,10 +1053,10 @@ body,
   width: 2.8rem;
   height: 2.8rem;
   place-items: center;
-  border: 1px solid #dce7d6;
+  border: 1px solid #d7e1d8;
   border-radius: 1rem;
   background: #ffffff;
-  color: #347a29;
+  color: #166534;
   box-shadow: 0 8px 24px rgb(48 56 48 / 0.1);
 }
 
@@ -1158,7 +1158,7 @@ body,
 .app-shell button[class*="bg-emerald-"],
 .app-shell button[class*="bg-purple-"],
 .app-shell button[class*="bg-gradient-"] {
-  box-shadow: 0 0 0 1px rgb(114 185 75 / 0.12), 0 3px 12px rgb(52 122 41 / 0.14) !important;
+  box-shadow: 0 0 0 1px rgb(22 163 74 / 0.12), 0 3px 12px rgb(21 128 61 / 0.14) !important;
 }
 
 .app-shell button[class*="bg-cyan-"]:hover,
@@ -1167,15 +1167,75 @@ body,
 .app-shell button[class*="bg-emerald-"]:hover,
 .app-shell button[class*="bg-purple-"]:hover,
 .app-shell button[class*="bg-gradient-"]:hover {
-  box-shadow: 0 0 0 1px rgb(114 185 75 / 0.2), 0 0 14px rgb(88 168 50 / 0.22) !important;
+  box-shadow: 0 0 0 1px rgb(22 163 74 / 0.2), 0 0 14px rgb(21 128 61 / 0.22) !important;
 }
 
 .app-shell button[class*="ring-emerald-"],
 .app-shell button[aria-current="page"],
 .app-shell button[aria-pressed="true"] {
-  box-shadow: 0 0 0 1px rgb(114 185 75 / 0.14), 0 0 10px rgb(88 168 50 / 0.12) !important;
+  box-shadow: 0 0 0 1px rgb(22 163 74 / 0.14), 0 0 10px rgb(21 128 61 / 0.12) !important;
 }
 
 .app-shell button:disabled {
   box-shadow: none !important;
+}
+
+.app-shell [class*="text-rose-"],
+.app-shell [class*="text-red-"] {
+  color: var(--theme-error) !important;
+}
+
+.app-shell [class*="text-amber-"],
+.app-shell [class*="text-yellow-"],
+.app-shell [class*="text-orange-"] {
+  color: var(--theme-warning) !important;
+}
+
+.app-shell [class*="bg-rose-"],
+.app-shell [class*="bg-red-"],
+.app-shell [class*="bg-pink-"] {
+  background-color: #fcebea !important;
+  background-image: none !important;
+}
+
+.app-shell button[class*="bg-rose-"],
+.app-shell button[class*="bg-red-"] {
+  background-color: var(--theme-error) !important;
+  border-color: var(--theme-error) !important;
+  color: #ffffff !important;
+}
+
+.app-shell [class*="border-rose-"],
+.app-shell [class*="border-red-"] {
+  border-color: rgb(180 35 24 / 0.35) !important;
+}
+
+.app-shell [class*="bg-amber-"],
+.app-shell [class*="bg-yellow-"],
+.app-shell [class*="bg-orange-"] {
+  background-color: #fff6db !important;
+  background-image: none !important;
+}
+
+.app-shell button[class*="bg-amber-"],
+.app-shell button[class*="bg-yellow-"],
+.app-shell button[class*="bg-orange-"] {
+  background-color: var(--theme-warning) !important;
+  border-color: var(--theme-warning) !important;
+  color: #ffffff !important;
+}
+
+.app-shell [class*="border-amber-"],
+.app-shell [class*="border-yellow-"],
+.app-shell [class*="border-orange-"] {
+  border-color: rgb(146 64 14 / 0.32) !important;
+}
+
+.app-shell button:disabled {
+  background-color: var(--theme-surface-elevated) !important;
+  border-color: var(--theme-border) !important;
+  color: var(--theme-text-muted) !important;
+  cursor: not-allowed;
+  filter: none !important;
+  opacity: 1 !important;
 }

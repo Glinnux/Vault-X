@@ -59,6 +59,19 @@ The GitHub Actions workflow builds the frontend with the `/Vault-X/` base path a
 
 GitHub Pages hosts static files only; Express server endpoints require a separate backend deployment.
 
+### Deploy the frontend to Vercel
+
+Vercel can connect directly to this GitHub repository and automatically redeploy whenever `main` is updated. The included `vercel.json` builds the Vite frontend into `dist/`, forwards `/api/...` requests to the existing Render backend, and routes client-side pages to the app.
+
+1. Sign in at [Vercel](https://vercel.com/) and choose **Add New** → **Project**.
+2. Import `Glinnux/Vault-X` from GitHub and deploy the `main` branch. Keep the project root at the repository root; Vercel reads the build, output, and routing settings from `vercel.json`.
+3. Leave `VITE_API_BASE_URL` unset so the app uses Vercel's `/api` rewrite. If file uploads use Supabase, add the existing `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` as Vercel environment variables. These are frontend values; never expose a Supabase secret key with a `VITE_` prefix.
+4. After the first deployment, add the Vercel hostname (for example, `vault-x.vercel.app`, without `https://` or a path) in Firebase Console → **Authentication** → **Settings** → **Authorized domains**. This is required for Google and email authentication from the new address.
+5. In the Render backend's environment settings, set `APP_URL` to the Vercel site URL so recovery and email links point to the deployed site. If you use a custom Vercel domain, use that exact URL. Add the Vercel origin to `APP_ORIGINS` as well if the frontend will call the Render API directly instead of using the `/api` rewrite.
+6. Redeploy the Render backend after changing its environment. Then open the Vercel URL and test sign-in, saving an item, and any file upload or email flows you use.
+
+Vercel hosts only the frontend. Keep the Express API, email credentials, Firebase Admin service account, and Supabase secret key on the backend; do not put server secrets in Vercel frontend variables.
+
 ---
 
 ### Step 4: Production Build & Run (Optional)

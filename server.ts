@@ -164,6 +164,131 @@ try {
   console.error('[Recovery] Firebase Admin SDK could not initialize:', error);
 }
 
+type AdminActivityAction =
+  | 'subscription_approved'
+  | 'subscription_extended'
+  | 'subscription_expired'
+  | 'subscription_reset'
+  | 'unlimited_slots_granted'
+  | 'user_banned'
+  | 'user_unbanned'
+  | 'admin_appointed'
+  | 'admin_revoked'
+  | 'admin_permissions_updated'
+  | 'ticket_status_changed'
+  | 'suggestion_redirected'
+  | 'recovery_request_decided'
+  | 'payment_status_changed';
+
+type AdminNotificationCategory = 'admin_activity' | 'payments' | 'support' | 'recovery';
+type AdminNotificationPreferences = Record<AdminNotificationCategory, boolean>;
+
+const DEFAULT_ADMIN_NOTIFICATION_PREFERENCES: AdminNotificationPreferences = {
+  admin_activity: false,
+  payments: false,
+  support: false,
+  recovery: true,
+};
+
+async function getAdminNotificationRecipients(category: AdminNotificationCategory): Promise<Set<string>> {
+  const recipients = new Set(SUPER_ADMIN_EMAILS);
+  if (category === 'payments' || category === 'support') {
+    recipients.add(normalizeEmail(SUPPORT_EMAIL));
+  }
+  if (!adminDb) return recipients;
+
+  try {
+    const adminsSnapshot = await adminDb.collection('admins').get();
+    const activeAdmins = adminsSnapshot.docs.filter(
+      (adminDoc) => !SUPER_ADMIN_EMAILS.has(normalizeEmail(adminDoc.data().email))
+    );
+    const preferenceSnapshots = await Promise.all(
+      activeAdmins.map((adminDoc) =>
+        adminDb!.collection('admin_notification_preferences').doc(adminDoc.id).get()
+      )
+    );
+    activeAdmins.forEach((adminDoc, index) => {
+      const categories = preferenceSnapshots[index].data()?.categories;
+      const enabled = categories
+        ? categories[category] === true
+        : DEFAULT_ADMIN_NOTIFICATION_PREFERENCES[category];
+      const email = normalizeEmail(adminDoc.data().email);
+      if (enabled && email) recipients.add(email);
+    });
+  } catch (error) {
+    console.error(`[Notifications] Could not load ${category} recipients:`, error);
+  }
+
+  recipients.delete('');
+  return recipients;
+}
+
+const ADMIN_ACTIVITY_LABELS: Record<AdminActivityAction, string> = {
+  subscription_approved: 'Subscription approved',
+  subscription_extended: 'Subscription extended',
+  subscription_expired: 'Subscription expired',
+  subscription_reset: 'Subscription reset',
+  unlimited_slots_granted: 'Unlimited slots granted',
+  user_banned: 'User banned',
+  user_unbanned: 'User unbanned',
+  admin_appointed: 'Administrator appointed',
+  admin_revoked: 'Administrator access revoked',
+  admin_permissions_updated: 'Administrator permissions updated',
+  ticket_status_changed: 'Support ticket status changed',
+  suggestion_redirected: 'Suggestion redirected',
+  recovery_request_decided: 'Account recovery request decided',
+  payment_status_changed: 'Payment status changed',
+};
+
+async function notifySuperAdminsOfActivity(
+  actorEmail: string,
+  action: AdminActivityAction,
+  targetUid: string,
+  targetEmail: string,
+  summary: string
+): Promise<boolean> {
+  const actionLabel = ADMIN_ACTIVITY_LABELS[action];
+  const subject = `[Vault X Admin Activity] ${actionLabel} - UID: ${targetUid}`;
+  const textContent = [
+    'An administrator action was completed in Vault X.',
+    '',
+    `Action: ${actionLabel}`,
+    `Performed by: ${actorEmail || 'Verified administrator'}`,
+    `Target UID: ${targetUid}`,
+    targetEmail ? `Target email: ${targetEmail}` : '',
+    `Details: ${summary}`,
+    `Time: ${new Date().toISOString()}`,
+  ].filter(Boolean).join('\n');
+  const fields: Record<string, string> = {
+    Notification: 'ADMIN ACTIVITY',
+    Action: actionLabel,
+    Performed_By: actorEmail || 'Verified administrator',
+    Target_UID: targetUid,
+    Details: summary,
+  };
+  if (targetEmail) fields.Target_Email = targetEmail;
+
+  const recipients = await getAdminNotificationRecipients('admin_activity');
+  const results = await Promise.all(
+    [...recipients].map(async (recipientEmail) => {
+      try {
+        return await dispatchEmailNotification({
+          subject,
+          recipientEmail,
+          fields,
+          textContent,
+        });
+      } catch (error) {
+        console.error(`[Admin Activity] Could not notify ${recipientEmail}:`, error);
+        return { sent: false, method: 'error', message: 'Notification delivery failed.' };
+      }
+    })
+  );
+  const sent = results.length > 0 && results.every((result) => result.sent);
+  if (!sent) console.error('[Admin Activity] One or more super-admin notifications were not delivered.');
+  return sent;
+}
+
 const RECOVERY_MAX_ATTEMPTS = 5;
 const RECOVERY_CODE_TTL_MS = 24 * 60 * 60 * 1000;
 
@@ -200,18 +325,7 @@ function recoveryCodeMatches(code: string, saltHex: string, hashHex: string): bo
 }
 
 async function notifyRecoveryAdmins(subject: string, body: string, fields: Record<string, string>) {
-  if (!adminDb) return;
-  const recipients = new Set(SUPER_ADMIN_EMAILS);
-  try {
-    const snapshot = await adminDb.collection('admins').get();
-    snapshot.docs.forEach((doc) => {
-      const email = normalizeEmail(doc.data().email);
-      if (email) recipients.add(email);
-    });
-  } catch (error) {
-    console.error('[Recovery] Could not load appointed admins:', error);
-  }
-
+  const recipients = await getAdminNotificationRecipients('recovery');
   await Promise.allSettled(
     [...recipients].map((recipientEmail) =>
       dispatchEmailNotification({
@@ -948,6 +1062,13 @@ app.post('/api/admin/recovery-requests/:id/decision', async (req: Request, res: 
 
     if (!approved) {
       await requestRef.update({ status: 'rejected', rejectedBy: user.uid, rejectedAt: Timestamp.now() });
+      await notifySuperAdminsOfActivity(
+        user.email,
+        'recovery_request_decided',
+        String(request.uid),
+        normalizeEmail(request.email),
+        'Recovery email change request rejected.'
+      );
       res.json({ message: 'Recovery request rejected.' });
       return;
     }
@@ -967,6 +1088,13 @@ app.post('/api/admin/recovery-requests/:id/decision', async (req: Request, res: 
     await adminDb.collection('users').doc(request.uid).set({ email: proposedEmail, updatedAt: Timestamp.now() }, { merge: true });
     await requestRef.update({ status: 'approved', approvedBy: user.uid, approvedAt: Timestamp.now(), usedAt: Timestamp.now() });
 
+    await notifySuperAdminsOfActivity(
+      user.email,
+      'recovery_request_decided',
+      String(request.uid),
+      proposedEmail,
+      'Recovery email change request approved.'
+    );
     res.json({ message: 'Recovery approved. The user can now sign in with the new email address.' });
   } catch (error) {
     console.error('[Recovery] Could not decide recovery request:', error);
@@ -1546,10 +1674,168 @@ async function dispatchEmailNotification({
   }
 }
 
+async function dispatchEmailNotificationToCategory(
+  category: AdminNotificationCategory,
+  notification: {
+    subject: string;
+    replyTo?: string;
+    fields: Record<string, string | number | undefined>;
+    textContent: string;
+    htmlContent?: string;
+    attachments?: Array<{ filename: string; content: Buffer; contentType?: string }>;
+  }
+): Promise<{ sent: boolean; method: string; message: string }> {
+  const recipients = await getAdminNotificationRecipients(category);
+  const results = await Promise.all(
+    [...recipients].map((recipientEmail) =>
+      dispatchEmailNotification({ ...notification, recipientEmail })
+    )
+  );
+  const sentCount = results.filter((result) => result.sent).length;
+  const sent = results.length > 0 && sentCount === results.length;
+  return {
+    sent,
+    method: [...new Set(results.map((result) => result.method))].join(', ') || 'none',
+    message: `${sentCount} of ${results.length} ${category} notification emails delivered.`,
+  };
+}
+
 // Endpoint to retrieve support email and status info
 app.get('/api/support-info', (_req: Request, res: Response) => {
   res.json({
     supportEmail: SUPPORT_EMAIL,
+  });
+});
+
+app.get('/api/admin/notification-preferences', async (req: Request, res: Response) => {
+  const user = await requireApiUser(req, res);
+  if (!user) return;
+  if (!SUPER_ADMIN_EMAILS.has(user.email)) {
+    res.status(403).json({ error: 'Only super admins can manage notification recipients.' });
+    return;
+  }
+  if (!adminDb) {
+    res.status(503).json({ error: 'Admin notification settings are not configured on the server.' });
+    return;
+  }
+
+  try {
+    const adminsSnapshot = await adminDb.collection('admins').get();
+    const admins = await Promise.all(adminsSnapshot.docs
+      .filter((adminDoc) => !SUPER_ADMIN_EMAILS.has(normalizeEmail(adminDoc.data().email)))
+      .map(async (adminDoc) => {
+        const preferenceSnapshot = await adminDb!.collection('admin_notification_preferences').doc(adminDoc.id).get();
+        const storedCategories = preferenceSnapshot.data()?.categories || {};
+        return {
+          userId: adminDoc.id,
+          email: normalizeEmail(adminDoc.data().email),
+          displayName: adminDoc.data().displayName || 'Administrator',
+          categories: {
+            ...DEFAULT_ADMIN_NOTIFICATION_PREFERENCES,
+            ...storedCategories,
+          },
+        };
+      }));
+    res.json({ admins });
+  } catch (error) {
+    console.error('[Notifications] Could not load admin notification settings:', error);
+    res.status(500).json({ error: 'Could not load admin notification settings.' });
+  }
+});
+
+app.put('/api/admin/notification-preferences', async (req: Request, res: Response) => {
+  const user = await requireApiUser(req, res);
+  if (!user) return;
+  if (!SUPER_ADMIN_EMAILS.has(user.email)) {
+    res.status(403).json({ error: 'Only super admins can manage notification recipients.' });
+    return;
+  }
+  if (!adminDb) {
+    res.status(503).json({ error: 'Admin notification settings are not configured on the server.' });
+    return;
+  }
+
+  const targetUid = String(req.body?.userId || '').trim();
+  const categories = req.body?.categories;
+  const categoryKeys = Object.keys(DEFAULT_ADMIN_NOTIFICATION_PREFERENCES) as AdminNotificationCategory[];
+  if (
+    !/^[A-Za-z0-9:_-]{1,128}$/.test(targetUid) ||
+    !categories ||
+    categoryKeys.some((key) => typeof categories[key] !== 'boolean')
+  ) {
+    res.status(400).json({ error: 'Notification settings are invalid.' });
+    return;
+  }
+
+  try {
+    const adminRef = adminDb.collection('admins').doc(targetUid);
+    const adminSnapshot = await adminRef.get();
+    if (!adminSnapshot.exists || SUPER_ADMIN_EMAILS.has(normalizeEmail(adminSnapshot.data()?.email))) {
+      res.status(404).json({ error: 'Appointed administrator not found.' });
+      return;
+    }
+
+    await adminDb.collection('admin_notification_preferences').doc(targetUid).set({
+      categories: Object.fromEntries(categoryKeys.map((key) => [key, categories[key]])),
+      updatedBy: user.uid,
+      updatedAt: Timestamp.now(),
+    });
+    res.json({ success: true });
+  } catch (error) {
+    console.error('[Notifications] Could not save admin notification settings:', error);
+    res.status(500).json({ error: 'Could not save admin notification settings.' });
+  }
+});
+
+app.post('/api/admin/activity-notification', rateLimit(20, 60_000), async (req: Request, res: Response) => {
+  const permissions: Partial<Record<AdminActivityAction, string>> = {
+    subscription_approved: 'giveSlots',
+    subscription_extended: 'giveSlots',
+    subscription_expired: 'giveSlots',
+    subscription_reset: 'giveSlots',
+    unlimited_slots_granted: 'giveSlots',
+    user_banned: 'banUsers',
+    admin_appointed: 'addAdmins',
+    admin_revoked: 'addAdmins',
+    admin_permissions_updated: 'addAdmins',
+    ticket_status_changed: 'answerComplaints',
+    suggestion_redirected: 'redirectSuggestions',
+  };
+  const actionValue = String(req.body?.action || '');
+  const action = actionValue as AdminActivityAction;
+  const permission = Object.hasOwn(permissions, action) ? permissions[action] : undefined;
+  if (!permission && action !== 'user_unbanned') {
+    res.status(400).json({ error: 'Admin activity type is invalid.' });
+    return;
+  }
+
+  const user = await requireApiUser(req, res, permission);
+  if (!user) return;
+  if (action === 'user_unbanned' && !SUPER_ADMIN_EMAILS.has(user.email)) {
+    res.status(403).json({ error: 'Only super admins can unban accounts.' });
+    return;
+  }
+
+  const targetUid = String(req.body?.targetUid || '').trim();
+  const targetEmail = normalizeEmail(req.body?.targetEmail);
+  const summary = String(req.body?.summary || '').trim();
+  if (
+    !/^[A-Za-z0-9:_-]{1,128}$/.test(targetUid) ||
+    (targetEmail && (!/^\S+@\S+\.\S+$/.test(targetEmail) || targetEmail.length > 254)) ||
+    !summary ||
+    summary.length > 500
+  ) {
+    res.status(400).json({ error: 'Admin activity details are invalid.' });
+    return;
+  }
+
+  const sent = await notifySuperAdminsOfActivity(user.email, action, targetUid, targetEmail, summary);
+  res.json({
+    success: true,
+    sent,
+    message: sent
+      ? 'Super-admin notification emails delivered.'
+      : 'The admin action was recorded, but one or more notification emails could not be delivered.',
   });
 });
 
@@ -1580,7 +1866,14 @@ app.post('/api/admin/payments/:id/status', async (req: Request, res: Response) =
     res.status(404).json({ error: 'Payment record not found' });
     return;
   }
-  res.json({ success: true, payment: updated });
+  const notificationSent = await notifySuperAdminsOfActivity(
+    user.email,
+    'payment_status_changed',
+    updated.userId,
+    updated.userEmail || '',
+    `Payment ${updated.id} status changed to ${status}.`
+  );
+  res.json({ success: true, payment: updated, notificationSent });
 });
 
 // Endpoint to get all support tickets for Admin Console
@@ -1734,10 +2027,9 @@ Thank you for choosing Clockin Vault.
 Quantum-Resistant Isolated Storage`;
 
     // 1. Dispatch email notification to Administrator
-    const adminDelivery = await dispatchEmailNotification({
+    const adminDelivery = await dispatchEmailNotificationToCategory('payments', {
       subject: adminEmailSubject,
       replyTo: userEmail || SUPPORT_EMAIL,
-      recipientEmail: SUPPORT_EMAIL,
       fields: {
         Notification: 'NEW PAYMENT SUBMISSION',
         User_UID: userId,
@@ -1903,10 +2195,9 @@ Admin Note: To verify or update this user's account permissions or slots,
 search for User UID "${userId}" in the Admin Console.`;
 
     // 1. Dispatch email to Administrator
-    const delivery = await dispatchEmailNotification({
+    const delivery = await dispatchEmailNotificationToCategory('support', {
       subject: emailSubject,
       replyTo: verifiedEmail || SUPPORT_EMAIL,
-      recipientEmail: SUPPORT_EMAIL,
       fields: {
         Ticket_Type: categoryLabel,
         User_UID: userId,

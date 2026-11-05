@@ -6,6 +6,7 @@ interface FuturisticHudBarProps {
   userEmail?: string | null;
   userUid?: string | null;
   onOpenGuide?: () => void;
+  onToast: (message: string, type?: 'success' | 'info' | 'error') => void;
 }
 
 export const FuturisticHudBar: React.FC<FuturisticHudBarProps> = ({
@@ -13,9 +14,21 @@ export const FuturisticHudBar: React.FC<FuturisticHudBarProps> = ({
   userEmail,
   userUid,
   onOpenGuide,
+  onToast,
 }) => {
   const [latency, setLatency] = useState(24);
   const [isSecure, setIsSecure] = useState(true);
+
+  const handleCopyUid = async () => {
+    if (!userUid) return;
+    try {
+      await navigator.clipboard.writeText(userUid);
+      onToast('User ID copied to clipboard.', 'success');
+    } catch (error) {
+      console.error('Could not copy user ID:', error);
+      onToast('Could not copy user ID. Check clipboard permissions.', 'error');
+    }
+  };
 
   // Micro jitter for latency to feel like a live secure socket
   useEffect(() => {
@@ -61,20 +74,23 @@ export const FuturisticHudBar: React.FC<FuturisticHudBarProps> = ({
         </div>
 
         {/* Right: Quick Security Audit trigger & Record badge */}
-        <div className="flex items-center space-x-2 ml-auto">
+        <div className="flex flex-wrap items-center justify-end gap-2 ml-auto">
           {userUid && (
             <div
-              className="hidden sm:inline-flex items-center space-x-1 bg-black/60 text-slate-300 border border-emerald-950 px-2 py-0.5 rounded text-[10px]"
+              className="inline-flex items-center space-x-1 bg-black/60 text-slate-300 border border-emerald-950 px-2 py-0.5 rounded text-[10px]"
               title={`Verification UID: ${userUid}`}
             >
               <span className="text-slate-400">UID:</span>
               <span className="text-emerald-300 font-bold">{userUid.slice(0, 8)}...</span>
               <button
-                onClick={() => navigator.clipboard.writeText(userUid)}
-                className="text-slate-400 hover:text-white p-0.5"
-                title="Copy UID"
+                type="button"
+                onClick={handleCopyUid}
+                className="inline-flex items-center gap-1 text-slate-400 hover:text-white p-1 rounded"
+                title="Copy user ID"
+                aria-label="Copy user ID"
               >
-                <Copy className="w-2.5 h-2.5" />
+                <Copy className="w-3 h-3" />
+                <span className="sm:hidden">Copy ID</span>
               </button>
             </div>
           )}

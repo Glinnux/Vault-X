@@ -60,6 +60,12 @@ import {
   banUserAccount,
   unbanUserAccount,
   redirectSuggestionToOwner,
+  fetchAdminNotificationRecipients,
+  saveAdminNotificationPreferences,
+  sendAdminActivityNotification,
+  type AdminNotificationRecipient,
+  type AdminNotificationCategory,
+  type AdminActivityAction,
   getAdminPermissions,
   isSuperAdminUser,
   ADMIN_EMAIL,
@@ -116,6 +122,9 @@ export const AdminUsersPage: React.FC<AdminUsersPageProps> = ({
   const [serverPayments, setServerPayments] = useState<ServerPaymentRecord[]>([]);
   const [adminsList, setAdminsList] = useState<AdminRecord[]>([]);
   const [adminsListLoaded, setAdminsListLoaded] = useState(false);
+  const [notificationAdmins, setNotificationAdmins] = useState<AdminNotificationRecipient[]>([]);
+  const [loadingNotificationAdmins, setLoadingNotificationAdmins] = useState(false);
+  const [savingNotificationAdminId, setSavingNotificationAdminId] = useState<string | null>(null);
   const [recoveryRequests, setRecoveryRequests] = useState<RecoveryRequest[]>([]);
 
   // Loading States
@@ -152,6 +161,46 @@ export const AdminUsersPage: React.FC<AdminUsersPageProps> = ({
   const [redirectingTicket, setRedirectingTicket] = useState<SupportTicket | null>(null);
   const [redirectNoteInput, setRedirectNoteInput] = useState('');
   const [isSubmittingRedirect, setIsSubmittingRedirect] = useState(false);
+
+  const recordAdminActivity = async (
+    action: AdminActivityAction,
+    targetUid: string,
+    summary: string,
+    targetEmail?: string
+  ) => {
+    try {
+      const result = await sendAdminActivityNotification({ action, targetUid, targetEmail, summary });
+      if (!result.sent) onToast('The change succeeded, but one or more admin activity emails could not be delivered.', 'error');
+    } catch (error) {
+      console.error('Could not send admin activity email:', error);
+      onToast('The change succeeded, but its admin activity email could not be sent.', 'error');
+    }
+  };
+
+  const handleSaveNotificationPreferences = async (recipient: AdminNotificationRecipient) => {
+    setSavingNotificationAdminId(recipient.userId);
+    try {
+      await saveAdminNotificationPreferences(recipient.userId, recipient.categories);
+      onToast(`Email notification preferences saved for ${recipient.email}.`, 'success');
+    } catch (error) {
+      console.error('Could not save admin notification preferences:', error);
+      onToast(error instanceof Error ? error.message : 'Could not save notification preferences.', 'error');
+    } finally {
+      setSavingNotificationAdminId(null);
+    }
+  };
+
+  const setNotificationCategory = (
+    userId: string,
+    category: AdminNotificationCategory,
+    enabled: boolean
+  ) => {
+    setNotificationAdmins((current) => current.map((recipient) =>
+      recipient.userId === userId
+        ? { ...recipient, categories: { ...recipient.categories, [category]: enabled } }
+        : recipient
+    ));
+  };
 
   // Check current user's role and granular permissions
   const isSuperAdmin = isSuperAdminUser(user?.email);
@@ -272,6 +321,29 @@ export const AdminUsersPage: React.FC<AdminUsersPageProps> = ({
   }, []);
 
   useEffect(() => {
+    if (!isSuperAdmin) {
+      setNotificationAdmins([]);
+      return;
+    }
+    let active = true;
+    setLoadingNotificationAdmins(true);
+    fetchAdminNotificationRecipients()
+      .then((recipients) => {
+        if (active) setNotificationAdmins(recipients);
+      })
+      .catch((error) => {
+        console.error('Could not load admin notification preferences:', error);
+        if (active) onToast(error instanceof Error ? error.message : 'Could not load notification preferences.', 'error');
+      })
+      .finally(() => {
+        if (active) setLoadingNotificationAdmins(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [isSuperAdmin, adminsList.length]);
+
+  useEffect(() => {
     if (!isSuperAdmin && adminsListLoaded && (!isAppointedAdmin || availableAdminTabs.length === 0)) {
       onBackToVault();
       return;
@@ -339,6 +411,7 @@ export const AdminUsersPage: React.FC<AdminUsersPageProps> = ({
     try {
       const result = await approveUserSubscriptionByAdmin(targetUid, duration);
       onToast(`Approved ${result.plan.name} (${result.plan.durationLabel}) for ${targetEmail}. Live countdown initiated!`, 'success');
+      await recordAdminActivity('subscription_approved', targetUid, `${result.plan.name} approved (${result.plan.durationLabel}).`, targetEmail);
     } catch (e: any) {
       console.error(e);
       onToast(e?.message || 'Failed to approve subscription', 'error');
@@ -358,6 +431,7 @@ export const AdminUsersPage: React.FC<AdminUsersPageProps> = ({
     try {
       await extendUserSubscriptionCountdown(targetUid, currentExpiresAt, days);
       onToast(`Extended countdown by +${days} days for ${targetEmail}`, 'info');
+      await recordAdminActivity('subscription_extended', targetUid, `Subscription countdown extended by ${days} days.`, targetEmail);
     } catch (e: any) {
       console.error(e);
       onToast(e?.message || 'Failed to extend countdown', 'error');
@@ -372,6 +446,7 @@ export const AdminUsersPage: React.FC<AdminUsersPageProps> = ({
     try {
       await expireUserSubscriptionNow(targetUid);
       onToast(`Expired countdown for ${targetEmail}. Space reset to 0; slots 11+ view-only.`, 'info');
+      await recordAdminActivity('subscription_expired', targetUid, 'Subscription countdown expired.', targetEmail);
     } catch (e: any) {
       console.error(e);
       onToast(e?.message || 'Failed to expire countdown', 'error');
@@ -386,6 +461,7 @@ export const AdminUsersPage: React.FC<AdminUsersPageProps> = ({
     try {
       await resetToFreePlan(targetUid, targetEmail);
       onToast(`Reset ${targetEmail} to Free Tier (10 slots)`, 'info');
+      await recordAdminActivity('subscription_reset', targetUid, 'Account reset to the free plan.', targetEmail);
     } catch (e: any) {
       console.error(e);
       onToast(e?.message || 'Failed to reset plan', 'error');
@@ -400,6 +476,7 @@ export const AdminUsersPage: React.FC<AdminUsersPageProps> = ({
     try {
       await grantUnlimitedSlots(targetUid);
       onToast(`Granted permanent unlimited slots to ${targetEmail}`, 'success');
+      await recordAdminActivity('unlimited_slots_granted', targetUid, 'Permanent unlimited slots granted.', targetEmail);
     } catch (e: any) {
       console.error(e);
       onToast(e?.message || 'Failed to grant unlimited slots', 'error');
@@ -442,6 +519,13 @@ export const AdminUsersPage: React.FC<AdminUsersPageProps> = ({
     try {
       await updateTicketStatus(ticketId, status);
       onToast(`Item marked as ${status.toUpperCase()}`, 'success');
+      const ticket = tickets.find((item) => item.id === ticketId);
+      await recordAdminActivity(
+        'ticket_status_changed',
+        ticket?.userId || ticketId,
+        `${ticket?.type || 'Support'} ticket ${ticketId} marked ${status}.`,
+        ticket?.userEmail
+      );
     } catch (e: any) {
       console.error(e);
       onToast('Failed to update ticket status', 'error');
@@ -476,6 +560,12 @@ export const AdminUsersPage: React.FC<AdminUsersPageProps> = ({
       window.open(gmailUrl, '_blank', 'noopener,noreferrer');
 
       onToast(`Successfully redirected suggestion to Primary Admin (${ADMIN_EMAIL})!`, 'success');
+      await recordAdminActivity(
+        'suggestion_redirected',
+        redirectingTicket.userId,
+        `Suggestion ticket ${redirectingTicket.id} redirected to the primary admin.`,
+        redirectingTicket.userEmail
+      );
       setRedirectingTicket(null);
     } catch (err: any) {
       console.error('Redirect suggestion failed:', err);
@@ -505,6 +595,7 @@ export const AdminUsersPage: React.FC<AdminUsersPageProps> = ({
         user?.email || ADMIN_EMAIL
       );
       onToast(`Account UID ${banningUser.userId} has been banned and locked.`, 'info');
+      await recordAdminActivity('user_banned', banningUser.userId, 'User account banned by an administrator.', banningUser.email);
       setBanningUser(null);
     } catch (err: any) {
       console.error('Ban user failed:', err);
@@ -523,6 +614,7 @@ export const AdminUsersPage: React.FC<AdminUsersPageProps> = ({
     try {
       await unbanUserAccount(targetUser.userId, user?.email || ADMIN_EMAIL);
       onToast(`Successfully unbanned user account UID: ${targetUser.userId}`, 'success');
+      await recordAdminActivity('user_unbanned', targetUser.userId, 'User account unbanned by a super admin.', targetUser.email);
     } catch (err: any) {
       console.error('Unban user failed:', err);
       onToast(err?.message || 'Failed to unban user account', 'error');
@@ -550,6 +642,12 @@ export const AdminUsersPage: React.FC<AdminUsersPageProps> = ({
         newAdminPerms
       );
       onToast(result.message, 'success');
+      await recordAdminActivity(
+        'admin_appointed',
+        result.user.userId,
+        'Administrator access granted.',
+        result.user.email
+      );
       setAppointSuccessNotice(result.message);
       setNewAdminIdentifier('');
       setShowPermsConfigInForm(false);
@@ -572,6 +670,7 @@ export const AdminUsersPage: React.FC<AdminUsersPageProps> = ({
     try {
       await removeAdminRole(targetUid, targetEmail);
       onToast(`Revoked admin privileges for ${targetEmail}`, 'info');
+      await recordAdminActivity('admin_revoked', targetUid, 'Administrator access revoked.', targetEmail);
     } catch (err: any) {
       console.error('Revoke admin failed:', err);
       onToast(err?.message || 'Failed to revoke administrator', 'error');
@@ -597,6 +696,12 @@ export const AdminUsersPage: React.FC<AdminUsersPageProps> = ({
     try {
       await updateAdminPermissions(editingAdmin.userId, permEditState);
       onToast(`Permissions successfully updated for ${editingAdmin.email}!`, 'success');
+      await recordAdminActivity(
+        'admin_permissions_updated',
+        editingAdmin.userId,
+        'Administrator permissions updated.',
+        editingAdmin.email
+      );
       setEditingAdmin(null);
     } catch (err: any) {
       console.error('Update permissions failed:', err);
@@ -2047,6 +2152,72 @@ export const AdminUsersPage: React.FC<AdminUsersPageProps> = ({
               )}
             </form>
           </div>
+
+          {isSuperAdmin && (
+            <section className="rounded-2xl border border-cyan-800/50 bg-slate-900/70 p-5 space-y-4">
+              <div className="flex items-start gap-3">
+                <div className="rounded-xl border border-cyan-700/50 bg-cyan-950/60 p-2 text-cyan-300">
+                  <Bell className="h-5 w-5" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-bold text-white">Admin Email Notifications</h4>
+                  <p className="mt-1 text-xs text-slate-400">
+                    Choose which notification types each appointed admin receives. Super admins are always included.
+                  </p>
+                </div>
+              </div>
+
+              {loadingNotificationAdmins ? (
+                <p className="text-xs text-slate-400">Loading notification preferences…</p>
+              ) : notificationAdmins.length === 0 ? (
+                <p className="rounded-xl border border-slate-800 bg-slate-950/60 p-3 text-xs text-slate-400">
+                  Appoint an administrator to configure their email notifications.
+                </p>
+              ) : (
+                <div className="space-y-3">
+                  {notificationAdmins.map((recipient) => {
+                    const options: Array<{ key: AdminNotificationCategory; label: string }> = [
+                      { key: 'admin_activity', label: 'Admin activity' },
+                      { key: 'payments', label: 'Payment submissions' },
+                      { key: 'support', label: 'Support tickets' },
+                      { key: 'recovery', label: 'Account recovery' },
+                    ];
+                    return (
+                      <div key={recipient.userId} className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+                        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                          <div>
+                            <p className="text-xs font-semibold text-white">{recipient.displayName}</p>
+                            <p className="text-[11px] text-slate-400">{recipient.email}</p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleSaveNotificationPreferences(recipient)}
+                            disabled={savingNotificationAdminId === recipient.userId}
+                            className="rounded-lg border border-cyan-700/60 bg-cyan-950/70 px-3 py-1.5 text-xs font-semibold text-cyan-200 hover:bg-cyan-900/70 disabled:opacity-50"
+                          >
+                            {savingNotificationAdminId === recipient.userId ? 'Saving…' : 'Save preferences'}
+                          </button>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                          {options.map(({ key, label }) => (
+                            <label key={key} className="flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-900/70 p-2 text-[11px] text-slate-300">
+                              <input
+                                type="checkbox"
+                                checked={recipient.categories[key]}
+                                onChange={(event) => setNotificationCategory(recipient.userId, key, event.target.checked)}
+                                className="rounded accent-emerald-600"
+                              />
+                              <span>{label}</span>
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+          )}
 
           {/* Current Administrators Directory */}
           <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-5 space-y-4">
