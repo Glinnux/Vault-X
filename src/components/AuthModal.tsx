@@ -126,7 +126,7 @@ export const AuthModal: React.FC = () => {
 
         {/* Header */}
         <div className="flex items-center space-x-3 mb-4">
-          <VaultXLogo size={42} showGlow={false} />
+          <VaultXLogo size={46} showGlow={false} />
           <div>
             <h3 className="text-lg font-extrabold text-white tracking-tight font-mono">
               {mode === 'forgot'

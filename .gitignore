@@ -2,6 +2,7 @@ node_modules/
 build/
 dist/
 dist-server/
+functions/lib/
 coverage/
 /data/
 .DS_Store

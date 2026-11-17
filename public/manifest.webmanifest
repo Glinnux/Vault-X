@@ -11,15 +11,15 @@
   "theme_color": "#FFFFFF",
   "icons": [
     {
-      "src": "vault-x-icon.png?v=3",
+      "src": "vault-x-mark.svg",
       "sizes": "512x512",
-      "type": "image/png",
+      "type": "image/svg+xml",
       "purpose": "any"
     },
     {
-      "src": "vault-x-icon-maskable.png?v=3",
+      "src": "vault-x-mark.svg",
       "sizes": "512x512",
-      "type": "image/png",
+      "type": "image/svg+xml",
       "purpose": "maskable"
     }
   ],

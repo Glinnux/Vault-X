@@ -45,7 +45,7 @@ interface AddVaultItemModalProps {
 
 const PRESETS = [
   { name: 'Google', url: 'https://accounts.google.com', category: 'social' as VaultCategory, color: 'text-red-400 border-red-500/30' },
-  { name: 'Facebook', url: 'https://www.facebook.com', category: 'social' as VaultCategory, color: 'text-blue-400 border-blue-500/30' },
+  { name: 'Facebook', url: 'https://www.facebook.com', category: 'social' as VaultCategory, color: 'text-emerald-700 border-emerald-300' },
   { name: 'GitHub', url: 'https://github.com/login', category: 'work' as VaultCategory, color: 'text-slate-300 border-slate-600' },
   { name: 'Apple', url: 'https://appleid.apple.com', category: 'personal' as VaultCategory, color: 'text-slate-200 border-slate-500' },
   { name: 'Microsoft', url: 'https://login.microsoftonline.com', category: 'work' as VaultCategory, color: 'text-amber-400 border-amber-500/30' },
@@ -162,7 +162,7 @@ export const AddVaultItemModal: React.FC<AddVaultItemModalProps> = ({
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.96, y: 10 }}
         transition={{ duration: 0.2, ease: 'easeOut' }}
-        className="bg-slate-900/95 border border-cyan-500/30 rounded-2xl w-full max-w-xl p-4 sm:p-6 shadow-2xl shadow-cyan-950/30 relative max-h-[90dvh] overflow-y-auto tech-corners"
+        className="vault-modal-panel bg-slate-900/95 border border-cyan-500/30 rounded-2xl w-full max-w-xl p-4 sm:p-6 shadow-2xl shadow-cyan-950/30 relative max-h-[90dvh] overflow-y-auto tech-corners"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -182,6 +182,7 @@ export const AddVaultItemModal: React.FC<AddVaultItemModalProps> = ({
           </div>
           <button
             onClick={onClose}
+            aria-label="Close add credential dialog"
             className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
           >
             <X className="w-5 h-5" />

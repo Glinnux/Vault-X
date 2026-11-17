@@ -1,4 +1,5 @@
 import { auth } from '../lib/firebase';
+import { getSuperAdminSessionHeaders } from './adminService';
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
 
@@ -38,6 +39,7 @@ async function request(path: string, init?: RequestInit) {
     headers: {
       ...(init?.headers || {}),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...getSuperAdminSessionHeaders(),
     },
   });
   const data = await response.json().catch(() => ({}));

@@ -141,7 +141,7 @@ export interface AdminPermissions {
   redirectSuggestions: boolean;
   // 5. Appointed admins ability to view transactions
   viewTransactions: boolean;
-  // 6. Appointed admins ability to ban suspicious users (unbanning is strictly superadmin role)
+  // Retained for compatibility with existing admin records; ban actions are SuperAdmin-only.
   banUsers: boolean;
   // 7. Ability to add admins
   addAdmins: boolean;
@@ -155,7 +155,7 @@ export const DEFAULT_APPOINTED_ADMIN_PERMISSIONS: AdminPermissions = {
   answerComplaints: true,
   redirectSuggestions: true,
   viewTransactions: true,
-  banUsers: true,
+  banUsers: false,
   addAdmins: false,
   receiveTransactionNotices: true,
 };

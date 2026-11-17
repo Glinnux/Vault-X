@@ -46,7 +46,7 @@ export const AndroidBottomNav: React.FC<AndroidBottomNavProps> = ({
           }`}
         >
           <div className="relative">
-            <VaultXLogo size={20} showGlow={false} />
+            <VaultXLogo size={22} showGlow={false} />
             {counts.all > 0 && (
               <span className="absolute -top-1 -right-2 text-[9px] font-mono px-1 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-500/40">
                 {counts.all}

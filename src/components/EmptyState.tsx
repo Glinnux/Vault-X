@@ -20,7 +20,7 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
     return (
       <div className="bg-[#05140d]/80 border border-emerald-900/50 rounded-2xl p-8 sm:p-12 text-center max-w-xl mx-auto my-6 backdrop-blur-sm tech-corners">
         <div className="flex items-center justify-center mb-5">
-          <VaultXLogo size={64} showGlow={true} />
+          <VaultXLogo size={70} showGlow={false} />
         </div>
         <h3 className="text-xl font-extrabold text-white mb-2 font-mono">
           Secure <span className="text-emerald-400">Vault X</span> Enclave

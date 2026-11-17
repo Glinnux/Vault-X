@@ -37,10 +37,11 @@ service cloud.firestore {
     }
 
     function isSuperAdmin() {
-      return isSignedIn() && request.auth.token.email != null && (
-        request.auth.token.email.lower() == 'oluwolefaith92@gmail.com' ||
-        request.auth.token.email.lower() == 'faitholuwole6@gmail.com'
-      );
+      return isSignedIn() &&
+        request.auth.token.email != null &&
+        request.auth.token.email.lower() == 'oluwolefaith92@gmail.com' &&
+        exists(/databases/$(database)/documents/super_admin_authorizations/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/super_admin_authorizations/$(request.auth.uid)).data.active == true;
     }
 
     function isAdmin() {
@@ -62,7 +63,6 @@ service cloud.firestore {
       return isSuperAdmin() ||
         hasAdminPermission('viewFullUserInfo') ||
         hasAdminPermission('giveSlots') ||
-        hasAdminPermission('banUsers') ||
         hasAdminPermission('addAdmins');
     }
 
@@ -177,9 +177,6 @@ service cloud.firestore {
           (hasAdminPermission('giveSlots') && incoming().diff(existing()).affectedKeys().hasOnly([
             'plan', 'planDuration', 'extraSlots', 'maxCredentialSlots', 'paymentStatus',
             'paymentRef', 'paymentCurrency', 'approvedAt', 'expiresAt', 'isExpired', 'updatedAt'
-          ])) ||
-          (hasAdminPermission('banUsers') && incoming().diff(existing()).affectedKeys().hasOnly([
-            'isBanned', 'bannedReason', 'bannedAt', 'bannedBy', 'updatedAt'
           ]))
         ) &&
         // Unbanning rule: if account is currently banned, only superadmin can unban it!

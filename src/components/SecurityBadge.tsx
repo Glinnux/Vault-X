@@ -30,7 +30,7 @@ export const SecurityModal: React.FC<SecurityModalProps> = ({ isOpen, onClose })
           {/* Header */}
           <div className="flex items-center justify-between pb-4 mb-4 border-b border-emerald-950">
             <div className="flex items-center space-x-3">
-              <VaultXLogo size={36} showGlow={false} />
+              <VaultXLogo size={40} showGlow={false} />
               <div>
                 <div className="flex items-center space-x-2">
                   <h3 className="text-base font-extrabold text-white font-mono">

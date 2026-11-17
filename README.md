@@ -1,6 +1,6 @@
-# Clockin Vault — Full-Stack Node.js & React Enclave
+# Vault X — Full-Stack Node.js & React Enclave
 
-Clockin Vault is an isolated credential locker and document storage web application built with a full-stack Node.js (Express + Vite) backend, React 19 frontend, and Google Cloud Firestore.
+Vault X is an isolated credential locker and document storage web application built with a full-stack Node.js (Express + Vite) backend, React 19 frontend, and Google Cloud Firestore.
 
 ---
 
@@ -31,8 +31,12 @@ Inside `.env`, verify or set:
 ```env
 PORT=3000
 SUPPORT_EMAIL="oluwolefaith92@gmail.com"
-GEMINI_API_KEY="YOUR_GEMINI_API_KEY_HERE" # Optional for AI Chatbot
+GROQ_API_KEY="YOUR_GROQ_API_KEY" # Optional; preferred AI chatbot provider
+GROQ_MODEL="openai/gpt-oss-20b"
+GEMINI_API_KEY="YOUR_GEMINI_API_KEY_HERE" # Gemini fallback
 ```
+
+For Super Admin verification, generate `SUPER_ADMIN_PASSWORD_HASH` with `node scripts/generate-super-admin-password-hash.mjs` and `SUPER_ADMIN_OWNER_WORD_HASH` with `node scripts/generate-super-admin-owner-word-hash.mjs` in interactive terminals. Both inputs are hidden; copy only each generated `scrypt$...` hash into the local `.env` and backend deployment's secret settings. Never configure either plaintext value or expose a hash through a `VITE_` variable. Firebase Admin credentials and Firestore access are required on the backend for persistent lockouts, short-lived one-use challenges, and sessions that remain active until manually ended or revoked.
 
 ---
 
@@ -71,6 +75,17 @@ Vercel can connect directly to this GitHub repository and automatically redeploy
 6. Redeploy the Render backend after changing its environment. Then open the Vercel URL and test sign-in, saving an item, and any file upload or email flows you use.
 
 Vercel hosts only the frontend. Keep the Express API, email credentials, Firebase Admin service account, and Supabase secret key on the backend; do not put server secrets in Vercel frontend variables.
+
+### Vault and administrator routes
+
+- `/vault` is the signed-in user's private vault. The account menu links to profile/settings, security information, and (for authorized administrators) `/admin`.
+- `/admin` verifies administrator access on the server. Its overview returns aggregate vault counts and permission-limited user metadata; it never returns credential or document contents.
+- The overview requires the Firebase Admin SDK on the backend. Activity and security sections explicitly report when persistent event logs are not configured.
+- `/superadmin` is guarded by the backend-issued Super Admin session; opening the route or calling a protected API directly does not bypass the password and owner-word checks. The session remains active until manually revoked.
+- Firestore Rules also require a server-managed active authorization record for Super Admin privileges. The record is created only after both verification factors succeed and removed when the last active session is revoked.
+- Authentication audit entries are stored server-side in `super_admin_audit_logs` with the event, actor UID, timestamp, and limited reason/count metadata. Passwords and owner words are never written to these entries; Firestore clients have no read or write access to this collection.
+- Set `FIREBASE_DATABASE_ID` to the same database ID in the Express backend and Firebase Functions environment. For local Functions emulation, copy `functions/.env.example` to `functions/.env`. Build and deploy Functions with `npm --prefix functions run build` followed by `firebase deploy --only functions`. This ensures Functions validate sessions in the same Firestore database as the backend.
+- Redeploy the Express backend and Firebase Functions after configuring the hashes and database ID; the static frontend alone cannot activate server-side verification.
 
 ---
 
@@ -148,5 +163,6 @@ If you are experiencing issues signing in, here are the exact causes and step-by
 
 ## 👑 Administrator Accounts & Privileges
 
-- **Primary Superadmin**: `oluwolefaith92@gmail.com` and `faitholuwole6@gmail.com`
-- Superadmin accounts possess unrestricted, permanent access to the Admin Console, live subscription countdowns, plan approvals, bank transfer verification queues, granular admin permissions editor, and exclusive authority to unban accounts.
+- **Primary Super Admin**: `oluwolefaith92@gmail.com`
+- Super Admin operations require the password and owner-word verification. The resulting session has no time-based expiry and remains active until manually ended or revoked.
+- The Super Admin retains elevated access to the Admin Console, live subscription countdowns, plan approvals, bank transfer verification queues, granular admin permissions editor, and exclusive authority to unban accounts.

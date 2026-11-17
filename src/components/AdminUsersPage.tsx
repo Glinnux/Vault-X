@@ -92,23 +92,34 @@ import {
 } from '../services/supportService';
 import { useAuth } from '../context/AuthContext';
 import { decideRecoveryRequest, fetchRecoveryRequests, RecoveryRequest } from '../services/recoveryService';
+
+export type AdminUsersTab = 'payments' | 'suggestions' | 'complaints' | 'feedback' | 'admins' | 'users' | 'resolved' | 'recovery' | 'settings';
+
+export interface AdminUsersNavigationItem {
+  id: AdminUsersTab;
+  label: string;
+  badge?: number;
+}
+
 interface AdminUsersPageProps {
   onBackToVault: () => void;
-  onOpenAdminChat: () => void;
   onToast: (msg: string, type?: 'success' | 'info' | 'error') => void;
+  activeTab: AdminUsersTab;
+  onActiveTabChange: (tab: AdminUsersTab) => void;
+  onNavigationChange: (items: AdminUsersNavigationItem[]) => void;
 }
 
 export const AdminUsersPage: React.FC<AdminUsersPageProps> = ({
   onBackToVault,
-  onOpenAdminChat,
   onToast,
+  activeTab,
+  onActiveTabChange,
+  onNavigationChange,
 }) => {
   const { user } = useAuth();
 
   // Primary Navigation Tabs: Redesigned into separate, non-confusing distinct tabs
-  const [activeTab, setActiveTab] = useState<
-    'payments' | 'suggestions' | 'complaints' | 'feedback' | 'admins' | 'users' | 'resolved' | 'recovery'
-  >('payments');
+  const setActiveTab = onActiveTabChange;
 
   // Bank Transfer Sub-tabs: 'notifications' (pending queue) vs 'resolved' (verified audit archive)
   const [paymentSubTab, setPaymentSubTab] = useState<'notifications' | 'resolved'>('notifications');
@@ -226,7 +237,7 @@ export const AdminUsersPage: React.FC<AdminUsersPageProps> = ({
     const canViewPayments = isSuperAdmin || currentAdminPerms.viewTransactions || currentAdminPerms.receiveTransactionNotices;
     const canViewSuggestions = isSuperAdmin || currentAdminPerms.answerComplaints || currentAdminPerms.redirectSuggestions;
     const canViewTickets = isSuperAdmin || currentAdminPerms.answerComplaints;
-    const canViewUsers = isSuperAdmin || currentAdminPerms.viewFullUserInfo || currentAdminPerms.giveSlots || currentAdminPerms.banUsers || currentAdminPerms.addAdmins;
+    const canViewUsers = isSuperAdmin || currentAdminPerms.viewFullUserInfo || currentAdminPerms.giveSlots || currentAdminPerms.addAdmins;
     const canViewResolved = isSuperAdmin || currentAdminPerms.viewTransactions || currentAdminPerms.receiveTransactionNotices ||
       currentAdminPerms.answerComplaints || currentAdminPerms.redirectSuggestions;
 
@@ -236,9 +247,10 @@ export const AdminUsersPage: React.FC<AdminUsersPageProps> = ({
       { id: 'complaints' as const, label: 'Complaints', allowed: canViewTickets },
       { id: 'feedback' as const, label: 'Feedback & Inquiries', allowed: canViewTickets },
       { id: 'resolved' as const, label: 'Resolved', allowed: canViewResolved },
-      { id: 'admins' as const, label: 'Appoint & Manage Admins', allowed: isSuperAdmin || currentAdminPerms.addAdmins },
+      { id: 'users' as const, label: 'Registered Users', allowed: canViewUsers },
+      { id: 'admins' as const, label: 'Registered Admins', allowed: isSuperAdmin || currentAdminPerms.addAdmins },
       { id: 'recovery' as const, label: 'Issues & Requests', allowed: isSuperAdmin || currentAdminPerms.addAdmins || currentAdminPerms.answerComplaints },
-      { id: 'users' as const, label: 'Registered Accounts', allowed: canViewUsers },
+      { id: 'settings' as const, label: 'Ban & Unban Users', allowed: isSuperAdmin },
     ].filter((tab) => tab.allowed);
   }, [isSuperAdmin, currentAdminPerms]);
 
@@ -255,7 +267,7 @@ export const AdminUsersPage: React.FC<AdminUsersPageProps> = ({
   useEffect(() => {
     const canViewUsers = isSuperAdmin || (
       isAppointedAdmin &&
-      (currentAdminPerms.viewFullUserInfo || currentAdminPerms.giveSlots || currentAdminPerms.banUsers || currentAdminPerms.addAdmins)
+      (currentAdminPerms.viewFullUserInfo || currentAdminPerms.giveSlots || currentAdminPerms.addAdmins)
     );
     if (!canViewUsers) {
       setUsers([]);
@@ -577,8 +589,8 @@ export const AdminUsersPage: React.FC<AdminUsersPageProps> = ({
 
   // --- Account Banning & Unbanning Handlers (Permission 6) ---
   const handleOpenBanModal = (targetUser: UserAccount) => {
-    if (!isSuperAdmin && !currentAdminPerms.banUsers) {
-      onToast('Access Denied: You do not have permission to ban suspicious users.', 'error');
+    if (!isSuperAdmin) {
+      onToast('Access Denied: User bans are managed by the SuperAdmin in Settings.', 'error');
       return;
     }
     setBanningUser(targetUser);
@@ -591,8 +603,7 @@ export const AdminUsersPage: React.FC<AdminUsersPageProps> = ({
     try {
       await banUserAccount(
         banningUser.userId,
-        banReasonInput.trim(),
-        user?.email || ADMIN_EMAIL
+        banReasonInput.trim()
       );
       onToast(`Account UID ${banningUser.userId} has been banned and locked.`, 'info');
       await recordAdminActivity('user_banned', banningUser.userId, 'User account banned by an administrator.', banningUser.email);
@@ -612,7 +623,7 @@ export const AdminUsersPage: React.FC<AdminUsersPageProps> = ({
       return;
     }
     try {
-      await unbanUserAccount(targetUser.userId, user?.email || ADMIN_EMAIL);
+      await unbanUserAccount(targetUser.userId);
       onToast(`Successfully unbanned user account UID: ${targetUser.userId}`, 'success');
       await recordAdminActivity('user_unbanned', targetUser.userId, 'User account unbanned by a super admin.', targetUser.email);
     } catch (err: any) {
@@ -721,6 +732,15 @@ export const AdminUsersPage: React.FC<AdminUsersPageProps> = ({
     [serverPayments]
   );
 
+  useEffect(() => {
+    onNavigationChange(availableAdminTabs.map((tab) => ({
+      id: tab.id,
+      label: tab.label,
+      ...(tab.id === 'payments' ? { badge: pendingPayments.length } : {}),
+      ...(tab.id === 'resolved' ? { badge: resolvedPayments.length + tickets.filter((ticket) => ticket.status === 'resolved').length } : {}),
+    })));
+  }, [availableAdminTabs, onNavigationChange, pendingPayments.length, resolvedPayments.length, tickets]);
+
   // Group tickets into separated categories
   const suggestionTickets = useMemo(
     () => tickets.filter((t) => t.type === 'suggestion'),
@@ -773,13 +793,16 @@ export const AdminUsersPage: React.FC<AdminUsersPageProps> = ({
 
   // Filtered registered users
   const filteredUsers = useMemo(() => {
-    if (!search.trim()) return users;
+    const registeredUsers = users.filter(
+      (account) => !isUserAdmin(account.email, account.userId) && account.role !== 'admin' && account.role !== 'superadmin'
+    );
+    if (!search.trim()) return registeredUsers;
     const q = search.toLowerCase();
-    return users.filter(
-      (u) =>
-        (u.email || '').toLowerCase().includes(q) ||
-        (u.displayName || '').toLowerCase().includes(q) ||
-        u.userId.toLowerCase().includes(q)
+    return registeredUsers.filter(
+      (account) =>
+        (account.email || '').toLowerCase().includes(q) ||
+        (account.displayName || '').toLowerCase().includes(q) ||
+        account.userId.toLowerCase().includes(q)
     );
   }, [users, search]);
 
@@ -798,224 +821,6 @@ export const AdminUsersPage: React.FC<AdminUsersPageProps> = ({
 
   return (
     <div className="space-y-6 animate-in fade-in pb-16">
-      {/* Top Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-800">
-        <div>
-          <button
-            onClick={onBackToVault}
-            className="inline-flex items-center space-x-1.5 text-xs text-indigo-400 hover:text-indigo-300 font-medium mb-2 cursor-pointer transition-colors"
-          >
-            <ArrowLeft className="w-3.5 h-3.5" />
-            <span>Back to My Personal Vault</span>
-          </button>
-          <div className="flex items-center space-x-2.5">
-            <div className="p-2.5 bg-gradient-to-br from-purple-900/80 to-indigo-900/80 border border-purple-500/40 rounded-xl text-purple-300 shadow-md">
-              <Shield className="w-6 h-6" />
-            </div>
-            <div>
-              <h2 className="text-xl font-bold text-white tracking-tight flex items-center gap-2">
-                <span>Administrative Console & Command</span>
-                {isSuperAdmin && (
-                  <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-purple-950 border border-purple-500/60 text-purple-300 font-mono font-bold">
-                    👑 SUPERADMIN
-                  </span>
-                )}
-              </h2>
-              <p className="text-xs text-slate-400">
-                Granular multi-admin permissions, separate queues & bank transfer verification &bull; Auth:{' '}
-                <span className="text-purple-300 font-mono font-medium">{user?.email || ADMIN_EMAIL}</span>
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={onOpenAdminChat}
-            className="inline-flex items-center gap-1.5 rounded-xl border border-cyan-500/40 bg-cyan-950/40 px-3 py-2 text-xs font-semibold text-cyan-200 transition-all hover:border-cyan-300 hover:bg-cyan-900/60"
-            title="Open Admin Chat"
-          >
-            <MessageCircle className="h-4 w-4" />
-            <span>Chat</span>
-          </button>
-          {isSuperAdmin ? (
-            <span className="px-3 py-1 rounded-full text-xs bg-purple-950/90 border border-purple-500/60 text-purple-200 flex items-center gap-1.5 font-bold shadow-sm">
-              <ShieldCheck className="w-4 h-4 text-purple-400" />
-              <span>Full Enclave Superadmin</span>
-            </span>
-          ) : (
-            <span className="px-3 py-1 rounded-full text-xs bg-indigo-950/80 border border-indigo-500/50 text-indigo-300 flex items-center gap-1.5 font-medium shadow-sm">
-              <Shield className="w-3.5 h-3.5 text-indigo-400" />
-              <span>Appointed Administrator</span>
-            </span>
-          )}
-        </div>
-      </div>
-
-      {/* Detailed metrics are reserved for the superadmin; appointed admins see only permitted tabs. */}
-      {isSuperAdmin && (
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-        {/* Metric 1: Pending Bank Transfers */}
-        <div
-          onClick={() => {
-            setActiveTab('payments');
-            setPaymentSubTab('notifications');
-          }}
-          className={`cursor-pointer rounded-xl p-3.5 border transition-all ${
-            activeTab === 'payments' && paymentSubTab === 'notifications'
-              ? 'bg-amber-950/30 border-amber-500/60 shadow-md'
-              : 'bg-slate-900/70 border-slate-800 hover:border-slate-700'
-          }`}
-        >
-          <span className="text-[10px] font-mono uppercase tracking-wider text-amber-400 font-bold flex items-center justify-between">
-            <span className="flex items-center gap-1">
-              <Bell className="w-3 h-3" />
-              <span>New Transfers</span>
-            </span>
-            {pendingPayments.length > 0 && (
-              <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />
-            )}
-          </span>
-          <div className="text-xl font-bold text-amber-300 mt-1 font-mono">{pendingPayments.length}</div>
-          <span className="text-[10px] text-slate-400">{resolvedPayments.length} resolved</span>
-        </div>
-
-        {/* Metric 2: Suggestions */}
-        <div
-          onClick={() => setActiveTab('suggestions')}
-          className={`cursor-pointer rounded-xl p-3.5 border transition-all ${
-            activeTab === 'suggestions'
-              ? 'bg-amber-950/30 border-amber-500/60 shadow-md'
-              : 'bg-slate-900/70 border-slate-800 hover:border-slate-700'
-          }`}
-        >
-          <span className="text-[10px] font-mono uppercase tracking-wider text-amber-400 font-bold flex items-center gap-1">
-            <Lightbulb className="w-3 h-3" />
-            <span>Suggestions</span>
-          </span>
-          <div className="text-xl font-bold text-amber-300 mt-1 font-mono">{suggestionTickets.length}</div>
-          <span className="text-[10px] text-slate-400">
-            {suggestionTickets.filter((t) => t.isRedirectedToOwner).length} forwarded
-          </span>
-        </div>
-
-        {/* Metric 3: Complaints */}
-        <div
-          onClick={() => setActiveTab('complaints')}
-          className={`cursor-pointer rounded-xl p-3.5 border transition-all ${
-            activeTab === 'complaints'
-              ? 'bg-rose-950/30 border-rose-500/60 shadow-md'
-              : 'bg-slate-900/70 border-slate-800 hover:border-slate-700'
-          }`}
-        >
-          <span className="text-[10px] font-mono uppercase tracking-wider text-rose-400 font-bold flex items-center gap-1">
-            <AlertTriangle className="w-3 h-3" />
-            <span>Complaints</span>
-          </span>
-          <div className="text-xl font-bold text-rose-300 mt-1 font-mono">{complaintTickets.length}</div>
-          <span className="text-[10px] text-slate-400">
-            {complaintTickets.filter((t) => t.status === 'pending').length} unaddressed
-          </span>
-        </div>
-
-        {/* Metric 4: Feedback */}
-        <div
-          onClick={() => setActiveTab('feedback')}
-          className={`cursor-pointer rounded-xl p-3.5 border transition-all ${
-            activeTab === 'feedback'
-              ? 'bg-cyan-950/30 border-cyan-500/60 shadow-md'
-              : 'bg-slate-900/70 border-slate-800 hover:border-slate-700'
-          }`}
-        >
-          <span className="text-[10px] font-mono uppercase tracking-wider text-cyan-400 font-bold flex items-center gap-1">
-            <MessageSquare className="w-3 h-3" />
-            <span>Inquiries</span>
-          </span>
-          <div className="text-xl font-bold text-cyan-300 mt-1 font-mono">{feedbackTickets.length}</div>
-          <span className="text-[10px] text-slate-400">General feedback</span>
-        </div>
-
-        {/* Metric 5: Admins */}
-        <div
-          onClick={() => setActiveTab('admins')}
-          className={`cursor-pointer rounded-xl p-3.5 border transition-all ${
-            activeTab === 'admins'
-              ? 'bg-purple-950/30 border-purple-500/60 shadow-md'
-              : 'bg-slate-900/70 border-slate-800 hover:border-slate-700'
-          }`}
-        >
-          <span className="text-[10px] font-mono uppercase tracking-wider text-purple-400 font-bold flex items-center gap-1">
-            <ShieldCheck className="w-3 h-3" />
-            <span>Admins</span>
-          </span>
-          <div className="text-xl font-bold text-purple-300 mt-1 font-mono">
-            {adminsList.length > 0 ? adminsList.length : 1}
-          </div>
-          <span className="text-[10px] text-slate-400">With permissions</span>
-        </div>
-
-        {/* Metric 6: Registered Users */}
-        <div
-          onClick={() => setActiveTab('users')}
-          className={`cursor-pointer rounded-xl p-3.5 border transition-all ${
-            activeTab === 'users'
-              ? 'bg-indigo-950/30 border-indigo-500/60 shadow-md'
-              : 'bg-slate-900/70 border-slate-800 hover:border-slate-700'
-          }`}
-        >
-          <span className="text-[10px] font-mono uppercase tracking-wider text-indigo-400 font-bold flex items-center gap-1">
-            <Users className="w-3 h-3" />
-            <span>Users</span>
-          </span>
-          <div className="text-xl font-bold text-indigo-300 mt-1 font-mono">{users.length}</div>
-          <span className="text-[10px] text-slate-400">UID Directory</span>
-        </div>
-      </div>
-      )}
-
-      {/* Main Distinct Tab Navigation Bar (Separating each feature into distinct tabs) */}
-      <div className="admin-tab-scroll flex flex-nowrap items-center gap-1.5 overflow-x-auto pb-1 border-b border-slate-800 text-xs">
-        {availableAdminTabs.map((tab) => {
-          const TabIcon = {
-            payments: CreditCard,
-            suggestions: Lightbulb,
-            complaints: AlertTriangle,
-            feedback: MessageSquare,
-            resolved: CheckCheck,
-            admins: ShieldCheck,
-            users: Users,
-            recovery: KeyRound,
-            chat: MessageCircle,
-          }[tab.id];
-          return (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              aria-current={activeTab === tab.id ? 'page' : undefined}
-              className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all whitespace-nowrap ${
-                activeTab === tab.id
-                  ? 'bg-indigo-950/80 text-indigo-200 border border-indigo-500/50 shadow-md'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-              }`}
-            >
-              <TabIcon className="w-4 h-4" />
-              <span>{tab.label}</span>
-              {tab.id === 'payments' && pendingPayments.length > 0 && (
-                <span className="text-[10px] px-2 py-0.5 bg-amber-500/20 border border-amber-500/40 text-amber-300 rounded-full font-mono font-bold">
-                  {pendingPayments.length}
-                </span>
-              )}
-              {tab.id === 'resolved' && (
-                <span className="text-[10px] px-2 py-0.5 bg-emerald-950 border border-emerald-700/50 rounded-full font-mono text-emerald-300">
-                  {resolvedPayments.length + tickets.filter((ticket) => ticket.status === 'resolved').length}
-                </span>
-              )}
-            </button>
-          );
-        })}
-      </div>
-
       {/* Global Filter Bar for Current Tab */}
       <div className="relative">
         <Search className="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
@@ -1036,13 +841,82 @@ export const AdminUsersPage: React.FC<AdminUsersPageProps> = ({
               ? 'Search administrators by email, name, or UID...'
               : activeTab === 'recovery'
               ? 'Search recovery requests by UID or email...'
+              : activeTab === 'settings'
+              ? 'Search registered users by UID, email, or name...'
               : activeTab === 'resolved'
               ? 'Search resolved issues and verified payments...'
-              : 'Search registered accounts by UID, email, or display name...'
+              : 'Search registered users by UID, email, or display name...'
           }
           className="w-full bg-slate-900/80 border border-slate-800 focus:border-cyan-500 rounded-xl pl-10 pr-4 py-2.5 text-xs text-white placeholder-slate-500 outline-none transition-all shadow-inner"
         />
       </div>
+
+      {/* ============================================================== */}
+      {activeTab === 'settings' && isSuperAdmin && (
+        <section className="space-y-4">
+          <div>
+            <h3 className="text-lg font-bold text-white flex items-center gap-2">
+              <Settings className="w-5 h-5 text-rose-300" />
+              User Ban Management
+            </h3>
+            <p className="text-xs text-slate-400 mt-1">Only the SuperAdmin can ban or unban registered user accounts. Administrator accounts are excluded.</p>
+          </div>
+          {loadingUsers ? (
+            <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-6 text-sm text-slate-400">Loading registered users...</div>
+          ) : filteredUsers.length === 0 ? (
+            <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-6 text-sm text-slate-400">No registered users match your search.</div>
+          ) : (
+            <div className="overflow-x-auto rounded-2xl border border-slate-800 bg-slate-900/60">
+              <table className="w-full text-left text-xs">
+                <thead className="border-b border-slate-800 bg-slate-950/80 text-slate-400">
+                  <tr>
+                    <th className="px-4 py-3">Registered User</th>
+                    <th className="px-4 py-3">Account Status</th>
+                    <th className="px-4 py-3">Ban Reason</th>
+                    <th className="px-4 py-3">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/60">
+                  {filteredUsers.map((account) => (
+                    <tr key={account.userId} className="hover:bg-slate-800/30">
+                      <td className="px-4 py-3">
+                        <strong className="block text-white">{account.displayName || 'Registered User'}</strong>
+                        <span className="mt-1 block font-mono text-slate-400">{account.email}</span>
+                        <span className="mt-1 block font-mono text-cyan-300">UID: {account.userId}</span>
+                      </td>
+                      <td className="px-4 py-3">
+                        {account.isBanned
+                          ? <span className="rounded-full border border-rose-500/50 bg-rose-950 px-2 py-1 font-bold text-rose-300">BANNED</span>
+                          : <span className="font-medium text-emerald-300">Active</span>}
+                      </td>
+                      <td className="max-w-xs px-4 py-3 text-slate-300">{account.isBanned ? (account.bannedReason || 'No reason recorded') : '—'}</td>
+                      <td className="px-4 py-3">
+                        {account.isBanned ? (
+                          <button
+                            type="button"
+                            onClick={() => void handleUnbanUser(account)}
+                            className="inline-flex items-center gap-1 rounded-lg border border-emerald-600/60 bg-emerald-950 px-3 py-2 font-bold text-emerald-300 hover:bg-emerald-900"
+                          >
+                            <UserCheck className="h-3.5 w-3.5" />Unban
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => handleOpenBanModal(account)}
+                            className="inline-flex items-center gap-1 rounded-lg border border-rose-800/60 bg-rose-950/60 px-3 py-2 text-rose-300 hover:bg-rose-900"
+                          >
+                            <UserX className="h-3.5 w-3.5" />Ban User
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      )}
 
       {/* ============================================================== */}
       {activeTab === 'recovery' && (
@@ -2108,18 +1982,12 @@ export const AdminUsersPage: React.FC<AdminUsersPageProps> = ({
                         </div>
                       </label>
 
-                      <label className="flex items-start space-x-2 cursor-pointer p-2 rounded-lg bg-slate-900/60 border border-slate-800 hover:border-slate-700">
-                        <input
-                          type="checkbox"
-                          checked={newAdminPerms.banUsers}
-                          onChange={(e) => setNewAdminPerms({ ...newAdminPerms, banUsers: e.target.checked })}
-                          className="mt-0.5 rounded text-purple-600 focus:ring-purple-500"
-                        />
+                      <div className="flex items-start space-x-2 p-2 rounded-lg bg-slate-900/60 border border-slate-800">
                         <div>
-                          <strong className="text-white block font-sans">6. Ability to Ban Users</strong>
-                          <span className="text-[11px] text-slate-400 block font-sans">Ban suspicious users (unbanning is strictly superadmin role)</span>
+                          <strong className="text-white block font-sans">6. User Ban Management</strong>
+                          <span className="text-[11px] text-slate-400 block font-sans">Only the SuperAdmin can ban or unban users in Settings.</span>
                         </div>
-                      </label>
+                      </div>
 
                       <label className="flex items-start space-x-2 cursor-pointer p-2 rounded-lg bg-slate-900/60 border border-slate-800 hover:border-slate-700">
                         <input
@@ -2266,7 +2134,7 @@ export const AdminUsersPage: React.FC<AdminUsersPageProps> = ({
                   <span className="px-2 py-1 rounded bg-purple-950/50 text-purple-300 border border-purple-800/40">✓ Answer Complaints</span>
                   <span className="px-2 py-1 rounded bg-purple-950/50 text-purple-300 border border-purple-800/40">✓ Strategic Redirect</span>
                   <span className="px-2 py-1 rounded bg-purple-950/50 text-purple-300 border border-purple-800/40">✓ View Transactions</span>
-                  <span className="px-2 py-1 rounded bg-purple-950/50 text-purple-300 border border-purple-800/40">✓ Ban & Unban (Sole)</span>
+                  <span className="px-2 py-1 rounded bg-purple-950/50 text-purple-300 border border-purple-800/40">✓ SuperAdmin Ban Settings</span>
                   <span className="px-2 py-1 rounded bg-purple-950/50 text-purple-300 border border-purple-800/40">✓ Add Admins</span>
                   <span className="px-2 py-1 rounded bg-purple-950/50 text-purple-300 border border-purple-800/40">✓ Purchase Notices</span>
                 </div>
@@ -2339,7 +2207,7 @@ export const AdminUsersPage: React.FC<AdminUsersPageProps> = ({
                           {perms.viewTransactions ? '✓ Transactions' : '✗ Transactions'}
                         </span>
                         <span className={`px-2 py-0.5 rounded border ${perms.banUsers ? 'bg-rose-950/60 text-rose-200 border-rose-800/40' : 'bg-slate-900 text-slate-500 border-slate-800'}`}>
-                          {perms.banUsers ? '✓ Ban Users' : '✗ Ban Users'}
+                          SuperAdmin-only ban settings
                         </span>
                         <span className={`px-2 py-0.5 rounded border ${perms.addAdmins ? 'bg-purple-950/60 text-purple-200 border-purple-800/40' : 'bg-slate-900 text-slate-500 border-slate-800'}`}>
                           {perms.addAdmins ? '✓ Add Admins' : '✗ Add Admins'}
@@ -2393,7 +2261,7 @@ export const AdminUsersPage: React.FC<AdminUsersPageProps> = ({
               <div className="flex items-center space-x-2">
                 <EyeOff className="w-4 h-4 text-indigo-400 flex-shrink-0" />
                 <span>
-                  <strong>Restricted UID View Active:</strong> Per your appointed admin permissions, user email and personal identity details are masked. You have access to verification UIDs, capacity allotments, countdowns, and banning actions.
+                  <strong>Restricted UID View Active:</strong> Per your appointed admin permissions, user email and personal identity details are masked. You have access to verification UIDs, capacity allotments, and countdowns.
                 </span>
               </div>
               <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-indigo-900 border border-indigo-700 text-indigo-300 uppercase">
@@ -2689,60 +2557,18 @@ export const AdminUsersPage: React.FC<AdminUsersPageProps> = ({
                           )}
                         </td>
 
-                        {/* Account Status & Banning / Unbanning Controls (User Request 3 #6) */}
+                        {/* Account Status */}
                         <td className="py-3.5 px-4 whitespace-nowrap">
-                          {isUserOwnerAdmin ? (
-                            <span className="text-[10px] text-purple-400 font-mono">Protected</span>
-                          ) : isBanned ? (
-                            <div className="flex flex-col gap-1">
-                              <span className="inline-flex items-center space-x-1 text-[10px] font-mono px-2 py-0.5 rounded-full bg-rose-950 border border-rose-500 text-rose-300 font-bold">
-                                <Slash className="w-3 h-3 text-rose-400" />
-                                <span>BANNED</span>
-                              </span>
-                              {u.bannedReason && (
-                                <span className="text-[9px] text-rose-300 max-w-[130px] truncate" title={u.bannedReason}>
-                                  {u.bannedReason}
-                                </span>
-                              )}
-
-                              {/* Unban Button: Strictly Superadmin role per instructions! */}
-                              {isSuperAdmin ? (
-                                <button
-                                  onClick={() => handleUnbanUser(u)}
-                                  className="text-[9px] px-2 py-0.5 bg-emerald-950 hover:bg-emerald-900 border border-emerald-600/60 text-emerald-300 rounded font-mono font-bold cursor-pointer transition-colors inline-flex items-center gap-1"
-                                  title="Superadmin Power: Unban this user account"
-                                >
-                                  <UserCheck className="w-3 h-3 text-emerald-400" />
-                                  <span>Unban Account</span>
-                                </button>
-                              ) : (
-                                <span
-                                  className="text-[9px] text-slate-500 font-mono italic"
-                                  title="Unbanning is strictly reserved for the primary superadmin"
-                                >
-                                  Superadmin unban only
-                                </span>
-                              )}
-                            </div>
+                          {isBanned ? (
+                            <span className="inline-flex items-center space-x-1 text-[10px] font-mono px-2 py-0.5 rounded-full bg-rose-950 border border-rose-500 text-rose-300 font-bold">
+                              <Slash className="w-3 h-3 text-rose-400" />
+                              <span>BANNED</span>
+                            </span>
                           ) : (
-                            <div className="flex flex-col gap-1">
-                              <span className="inline-flex items-center space-x-1 text-[10px] font-mono text-emerald-400 font-medium">
-                                <CheckCircle2 className="w-3 h-3" />
-                                <span>Active</span>
-                              </span>
-
-                              {/* Ban Button: Appointed admins with banUsers, or Superadmin */}
-                              {(isSuperAdmin || currentAdminPerms.banUsers) && (
-                                <button
-                                  onClick={() => handleOpenBanModal(u)}
-                                  className="text-[9px] px-2 py-0.5 bg-rose-950/60 hover:bg-rose-900 border border-rose-800/60 text-rose-300 rounded font-mono cursor-pointer transition-colors inline-flex items-center gap-1"
-                                  title="Ban suspicious user"
-                                >
-                                  <UserX className="w-3 h-3 text-rose-400" />
-                                  <span>Ban User</span>
-                                </button>
-                              )}
-                            </div>
+                            <span className="inline-flex items-center space-x-1 text-[10px] font-mono text-emerald-400 font-medium">
+                              <CheckCircle2 className="w-3 h-3" />
+                              <span>Active</span>
+                            </span>
                           )}
                         </td>
 
@@ -2886,17 +2712,11 @@ export const AdminUsersPage: React.FC<AdminUsersPageProps> = ({
               {/* Permission 6 */}
               <label className="flex items-start justify-between p-3 rounded-xl bg-slate-950 border border-slate-800 hover:border-purple-500/40 cursor-pointer transition-colors">
                 <div className="pr-3">
-                  <div className="text-xs font-bold text-white">6. Ability to Ban Users (Unbanning is Strictly Primary Owner Role)</div>
+                  <div className="text-xs font-bold text-white">6. User Ban Management (SuperAdmin Only)</div>
                   <p className="text-[11px] text-slate-400 mt-0.5 leading-snug">
-                    Appointed admin can ban suspicious or malicious users. Note: Unbanning is strictly reserved for the primary superadmin.
+                    Only the SuperAdmin can manage user bans and unbans in Settings.
                   </p>
                 </div>
-                <input
-                  type="checkbox"
-                  checked={permEditState.banUsers}
-                  onChange={(e) => setPermEditState({ ...permEditState, banUsers: e.target.checked })}
-                  className="mt-1 w-4 h-4 text-purple-600 rounded focus:ring-purple-500"
-                />
               </label>
 
               {/* Permission 7 */}

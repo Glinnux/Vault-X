@@ -6,10 +6,10 @@ import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
 import dotenv from 'dotenv';
 import nodemailer from 'nodemailer';
-import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'crypto';
+import { createHash, randomBytes, randomInt, scryptSync, timingSafeEqual } from 'crypto';
 import { applicationDefault, cert, getApps, initializeApp } from 'firebase-admin/app';
 import { getAuth as getAdminAuth } from 'firebase-admin/auth';
-import { getFirestore as getAdminFirestore, Timestamp } from 'firebase-admin/firestore';
+import { getFirestore as getAdminFirestore, Timestamp, type Transaction } from 'firebase-admin/firestore';
 import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 
 dotenv.config();
@@ -89,8 +89,8 @@ app.use((req, res, next) => {
   if (origin && allowedOrigins.has(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Vary', 'Origin');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Super-Admin-Session, X-Super-Admin-Challenge');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, OPTIONS');
   }
   if (req.method === 'OPTIONS') {
     res.sendStatus(origin && allowedOrigins.has(origin) ? 204 : 403);
@@ -102,6 +102,7 @@ app.use((req, res, next) => {
 type VerifiedApiUser = {
   uid: string;
   email: string;
+  emailVerified: boolean;
   idToken: string;
   permissions: Record<string, boolean>;
 };
@@ -137,6 +138,11 @@ const localServiceAccountPath = process.env.GOOGLE_APPLICATION_CREDENTIALS ||
 const SUPER_ADMIN_EMAILS = new Set([
   'oluwolefaith92@gmail.com',
 ]);
+const SUPER_ADMIN_ACCESS_CHALLENGE_MS = 5 * 60_000;
+const SUPER_ADMIN_PASSWORD_HASH = process.env.SUPER_ADMIN_PASSWORD_HASH || '';
+const SUPER_ADMIN_OWNER_WORD_HASH = process.env.SUPER_ADMIN_OWNER_WORD_HASH || '';
+const SUPER_ADMIN_AUDIT_LOGS = 'super_admin_audit_logs';
+const SUPER_ADMIN_AUTHORIZATIONS = 'super_admin_authorizations';
 
 // Firebase Admin is initialized only on the trusted server. The service-account
 // file must never be imported by the browser or committed to the repository.
@@ -290,7 +296,8 @@ async function notifySuperAdminsOfActivity(
 }
 
 const RECOVERY_MAX_ATTEMPTS = 5;
-const RECOVERY_CODE_TTL_MS = 24 * 60 * 60 * 1000;
+const RECOVERY_VERIFICATION_TTL_MS = 10 * 60 * 1000;
+const RECOVERY_VERIFICATION_MAX_ATTEMPTS = 5;
 
 function normalizeEmail(value: unknown): string {
   return String(value || '').trim().toLowerCase();
@@ -308,6 +315,51 @@ function generateRecoveryCode(): string {
   const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   const bytes = randomBytes(6);
   return Array.from(bytes, (byte) => alphabet[byte % alphabet.length]).join('');
+}
+
+async function issueRecoveryCodeForAccount(account: { uid: string; email?: string | null; displayName?: string | null }) {
+  if (!adminDb) throw new Error('Secure recovery is not configured on the server yet.');
+
+  const code = generateRecoveryCode();
+  const salt = randomBytes(16);
+  const now = Date.now();
+  const recoveryRequests = adminDb.collection('recovery_requests');
+  const requestRef = recoveryRequests.doc(recoveryLookupId(code));
+
+  await adminDb.runTransaction(async (transaction) => {
+    const activeCodes = await transaction.get(
+      recoveryRequests.where('uid', '==', account.uid).where('status', '==', 'issued')
+    );
+    activeCodes.docs.forEach((snapshot) => {
+      transaction.update(snapshot.ref, { status: 'replaced', updatedAt: Timestamp.fromMillis(now) });
+    });
+    transaction.set(requestRef, {
+      uid: account.uid,
+      email: normalizeEmail(account.email),
+      displayName: account.displayName || '',
+      codeHash: hashRecoveryCode(code, salt).toString('hex'),
+      codeSalt: salt.toString('hex'),
+      status: 'issued',
+      attempts: 0,
+      createdAt: Timestamp.fromMillis(now),
+    });
+  });
+
+  await notifyRecoveryAdmins(
+    `[Vault X] Recovery code issued for UID ${account.uid}`,
+    `A recovery code was issued for a Vault X account. No recovery code is included in this notification.\n\nUID: ${account.uid}\nAccount email: ${account.email || 'Unavailable'}\nThe code can be used once and replaces any previous unused code.`,
+    { UID: account.uid, 'Account email': account.email || 'Unavailable', Expiration: 'One-time use; no expiration' }
+  );
+
+  return { code };
+}
+
+async function hasRecentAuthentication(user: VerifiedApiUser): Promise<boolean> {
+  if (!adminAuth) return false;
+  const decodedToken = await adminAuth.verifyIdToken(user.idToken, true);
+  const authTime = Number(decodedToken.auth_time);
+  const ageInSeconds = Date.now() / 1000 - authTime;
+  return Number.isFinite(authTime) && ageInSeconds >= 0 && ageInSeconds <= 5 * 60;
 }
 
 function hashRecoveryCode(code: string, salt: Buffer): Buffer {
@@ -379,6 +431,7 @@ async function verifyApiUser(req: Request): Promise<VerifiedApiUser | null> {
       return {
         uid: account.uid,
         email: normalizeEmail(account.email || decoded.email || ''),
+        emailVerified: account.emailVerified === true,
         idToken,
         permissions: await loadAdminPermissions(account.uid, idToken),
       };
@@ -399,11 +452,73 @@ async function verifyApiUser(req: Request): Promise<VerifiedApiUser | null> {
     return {
       uid: account.localId,
       email: String(account.email || '').toLowerCase(),
+      emailVerified: account.emailVerified === true,
       idToken,
       permissions: await loadAdminPermissions(account.localId, idToken),
     };
   } catch (_error) {
     return null;
+  }
+}
+
+async function validateSuperAdminSession(user: VerifiedApiUser, req: Request, res: Response): Promise<boolean> {
+  if (!user.emailVerified || !SUPER_ADMIN_EMAILS.has(user.email)) {
+    res.status(403).json({ error: 'Super Admin access is not authorized for this account.' });
+    return false;
+  }
+  if (!adminDb) {
+    res.status(503).json({ error: 'Super Admin access verification is not configured on the server.' });
+    return false;
+  }
+
+  const sessionToken = req.header('x-super-admin-session') || '';
+  if (!/^[A-Za-z0-9_-]{40,100}$/.test(sessionToken)) {
+    res.status(401).json({ error: 'Super Admin verification is required.' });
+    return false;
+  }
+
+  try {
+    const sessionId = createHash('sha256').update(sessionToken).digest('hex');
+    const sessionRef = adminDb.collection('super_admin_access_sessions').doc(sessionId);
+    const session = await sessionRef.get();
+    const data = session.data();
+    if (!session.exists || data?.uid !== user.uid) {
+      res.status(401).json({ error: 'Super Admin verification is no longer active. Verify both steps again.' });
+      return false;
+    }
+    if (sessionHasExpired(data, Date.now())) {
+      const expiredAt = Date.now();
+      const sessionQuery = adminDb.collection('super_admin_access_sessions').where('uid', '==', user.uid);
+      const authorizationRef = adminDb.collection(SUPER_ADMIN_AUTHORIZATIONS).doc(user.uid);
+      await adminDb.runTransaction(async (transaction) => {
+        const [latestSession, sessions] = await Promise.all([
+          transaction.get(sessionRef),
+          transaction.get(sessionQuery),
+        ]);
+        if (!latestSession.exists || latestSession.data()?.uid !== user.uid || !sessionHasExpired(latestSession.data(), expiredAt)) {
+          return;
+        }
+        transaction.delete(sessionRef);
+        const otherActiveSessions = sessions.docs.filter((candidate) =>
+          candidate.id !== sessionId && candidate.data().uid === user.uid && !sessionHasExpired(candidate.data(), expiredAt)
+        );
+        if (otherActiveSessions.length === 0) transaction.delete(authorizationRef);
+        addSuperAdminAuditEvent(
+          transaction,
+          'super_admin_session_expired',
+          user.uid,
+          {},
+          expiredAt
+        );
+      });
+      res.status(401).json({ error: 'Super Admin verification is no longer active. Verify both steps again.' });
+      return false;
+    }
+    return true;
+  } catch (error) {
+    console.error('[Super Admin] Could not validate access session:', error);
+    res.status(503).json({ error: 'Super Admin access verification is temporarily unavailable.' });
+    return false;
   }
 }
 
@@ -414,6 +529,9 @@ async function requireApiUser(req: Request, res: Response, permission?: string |
     return null;
   }
   if (permission) {
+    if (SUPER_ADMIN_EMAILS.has(user.email) && !(await validateSuperAdminSession(user, req, res))) {
+      return null;
+    }
     const allowed = SUPER_ADMIN_EMAILS.has(user.email) || (Array.isArray(permission)
       ? permission.some((key) => user.permissions[key] === true)
       : user.permissions[permission] === true);
@@ -424,6 +542,436 @@ async function requireApiUser(req: Request, res: Response, permission?: string |
   }
   return user;
 }
+
+function getSuperAdminSecretDigest(encodedHash: string): { salt: Buffer; digest: Buffer } | null {
+  const match = /^scrypt\$([a-f0-9]{32,})\$([a-f0-9]{128})$/i.exec(encodedHash);
+  if (!match || match[1].length % 2 !== 0) return null;
+  return { salt: Buffer.from(match[1], 'hex'), digest: Buffer.from(match[2], 'hex') };
+}
+
+function superAdminSecretMatches(value: string, secretConfig: { salt: Buffer; digest: Buffer }): boolean {
+  const candidate = scryptSync(value, secretConfig.salt, secretConfig.digest.length);
+  return timingSafeEqual(candidate, secretConfig.digest);
+}
+
+type SuperAdminAuditEvent =
+  | 'verification_started'
+  | 'password_verification_success'
+  | 'password_verification_failure'
+  | 'owner_word_verification_success'
+  | 'owner_word_verification_failure'
+  | 'super_admin_session_created'
+  | 'super_admin_session_expired'
+  | 'super_admin_logout'
+  | 'failed_verification_attempt';
+
+type SuperAdminAuditDetails = {
+  factor?: 'password' | 'owner_word';
+  reason?: 'incorrect' | 'invalid_input' | 'locked' | 'challenge_expired' | 'invalid_challenge' | 'configuration_unavailable';
+  failureCount?: number;
+};
+
+function superAdminAuditRecord(
+  event: SuperAdminAuditEvent,
+  actorUid: string,
+  details: SuperAdminAuditDetails = {},
+  timestamp = Date.now()
+) {
+  return {
+    event,
+    actorUid,
+    details,
+    createdAt: Timestamp.fromMillis(timestamp),
+  };
+}
+
+function addSuperAdminAuditEvent(
+  transaction: Transaction,
+  event: SuperAdminAuditEvent,
+  actorUid: string,
+  details: SuperAdminAuditDetails = {},
+  timestamp = Date.now()
+) {
+  if (!adminDb) throw new Error('Super Admin audit storage is not configured.');
+  transaction.create(
+    adminDb.collection(SUPER_ADMIN_AUDIT_LOGS).doc(),
+    superAdminAuditRecord(event, actorUid, details, timestamp)
+  );
+}
+
+async function recordSuperAdminAuditEvents(
+  actorUid: string,
+  events: Array<{ event: SuperAdminAuditEvent; details?: SuperAdminAuditDetails }>,
+  timestamp = Date.now()
+) {
+  if (!adminDb) throw new Error('Super Admin audit storage is not configured.');
+  const batch = adminDb.batch();
+  for (const { event, details } of events) {
+    batch.create(
+      adminDb.collection(SUPER_ADMIN_AUDIT_LOGS).doc(),
+      superAdminAuditRecord(event, actorUid, details, timestamp)
+    );
+  }
+  await batch.commit();
+}
+
+function sessionHasExpired(data: FirebaseFirestore.DocumentData | undefined, now: number): boolean {
+  if (data?.expiresAt === undefined || data?.expiresAt === null) return false;
+  const expiresAt = firestoreMillis(data.expiresAt);
+  return !expiresAt || expiresAt <= now;
+}
+
+async function requireSuperAdminSession(req: Request, res: Response) {
+  const user = await requireApiUser(req, res);
+  if (!user) return null;
+  return await validateSuperAdminSession(user, req, res) ? user : null;
+}
+
+app.post('/api/superadmin/access/check', rateLimit(30, 60_000), async (req: Request, res: Response) => {
+  const user = await requireSuperAdminSession(req, res);
+  if (!user) return;
+  res.json({ verified: true });
+});
+
+async function requireSuperAdminChallenge(req: Request, res: Response) {
+  const user = await requireApiUser(req, res);
+  if (!user) return null;
+  if (!user.emailVerified || !SUPER_ADMIN_EMAILS.has(user.email)) {
+    res.status(403).json({ error: 'Super Admin access is not authorized for this account.' });
+    return null;
+  }
+  if (!adminDb) {
+    res.status(503).json({ error: 'Super Admin access verification is not configured on the server.' });
+    return null;
+  }
+
+  try {
+    await recordSuperAdminAuditEvents(user.uid, [
+      { event: 'verification_started', details: { factor: 'owner_word' } },
+    ]);
+    const challengeToken = req.header('x-super-admin-challenge') || '';
+    if (!/^[A-Za-z0-9_-]{40,100}$/.test(challengeToken)) {
+      await recordSuperAdminAuditEvents(user.uid, [
+        { event: 'owner_word_verification_failure', details: { factor: 'owner_word', reason: 'invalid_challenge' } },
+        { event: 'failed_verification_attempt', details: { factor: 'owner_word', reason: 'invalid_challenge' } },
+      ]);
+      res.status(401).json({ error: 'Complete password verification before entering the owner word.' });
+      return null;
+    }
+
+    const challengeId = createHash('sha256').update(challengeToken).digest('hex');
+    const challenge = await adminDb.collection('super_admin_access_challenges').doc(challengeId).get();
+    const data = challenge.data();
+    const expiresAt = firestoreMillis(data?.expiresAt);
+    if (!challenge.exists || data?.uid !== user.uid || !expiresAt || expiresAt <= Date.now()) {
+      await recordSuperAdminAuditEvents(user.uid, [
+        { event: 'owner_word_verification_failure', details: { factor: 'owner_word', reason: 'challenge_expired' } },
+        { event: 'failed_verification_attempt', details: { factor: 'owner_word', reason: 'challenge_expired' } },
+      ]);
+      res.status(401).json({ error: 'The password verification expired. Start verification again.' });
+      return null;
+    }
+    return { user, challengeId };
+  } catch (error) {
+    console.error('[Super Admin] Could not validate owner verification challenge:', error);
+    res.status(503).json({ error: 'Super Admin access verification is temporarily unavailable.' });
+    return null;
+  }
+}
+
+app.post('/api/superadmin/access/verify', rateLimit(10, 15 * 60_000), async (req: Request, res: Response) => {
+  const user = await requireApiUser(req, res);
+  if (!user) return;
+  if (!user.emailVerified || !SUPER_ADMIN_EMAILS.has(user.email)) {
+    res.status(403).json({ error: 'Super Admin access is not authorized for this account.' });
+    return;
+  }
+  if (!adminDb) {
+    res.status(503).json({ error: 'Super Admin access verification is not configured on the server.' });
+    return;
+  }
+
+  const now = Date.now();
+  try {
+    await recordSuperAdminAuditEvents(user.uid, [
+      { event: 'verification_started', details: { factor: 'password' } },
+    ], now);
+  } catch (error) {
+    console.error('[Super Admin] Could not record verification start:', error);
+    res.status(503).json({ error: 'Super Admin audit logging is temporarily unavailable.' });
+    return;
+  }
+
+  const password = req.body?.password;
+  const passwordValue = typeof password === 'string' ? password : '';
+  const passwordInputValid = passwordValue.length > 0 && passwordValue.length <= 1024;
+  const passwordConfig = getSuperAdminSecretDigest(SUPER_ADMIN_PASSWORD_HASH);
+  if (!passwordConfig) {
+    try {
+      await recordSuperAdminAuditEvents(user.uid, [
+        { event: 'password_verification_failure', details: { factor: 'password', reason: 'configuration_unavailable' } },
+      ]);
+    } catch (error) {
+      console.error('[Super Admin] Could not record password verification failure:', error);
+      res.status(503).json({ error: 'Super Admin audit logging is temporarily unavailable.' });
+      return;
+    }
+    res.status(503).json({ error: 'Super Admin password verification is not configured on the server.' });
+    return;
+  }
+
+  const passwordMatches = passwordInputValid && superAdminSecretMatches(passwordValue, passwordConfig);
+  const attemptRef = adminDb.collection('super_admin_access_attempts')
+    .doc(createHash('sha256').update(user.uid).digest('hex'));
+  const challengeToken = randomBytes(32).toString('base64url');
+  const challengeId = createHash('sha256').update(challengeToken).digest('hex');
+  const expiresAt = now + SUPER_ADMIN_ACCESS_CHALLENGE_MS;
+  const challengeRef = adminDb.collection('super_admin_access_challenges').doc(challengeId);
+
+  try {
+    const outcome = await adminDb.runTransaction(async (transaction) => {
+      const attemptSnapshot = await transaction.get(attemptRef);
+      const attemptData = attemptSnapshot.data();
+      const lockedUntil = firestoreMillis(attemptData?.lockedUntil);
+      if (lockedUntil && lockedUntil > now) {
+        const details = { factor: 'password' as const, reason: 'locked' as const, failureCount: 5 };
+        addSuperAdminAuditEvent(transaction, 'password_verification_failure', user.uid, details, now);
+        addSuperAdminAuditEvent(transaction, 'failed_verification_attempt', user.uid, details, now);
+        return { status: 'locked' as const, retryAfterSeconds: Math.ceil((lockedUntil - now) / 1000) };
+      }
+
+      if (!passwordMatches) {
+        const failures = Number(attemptData?.failures) || 0;
+        const failureCount = failures + 1;
+        const reason: SuperAdminAuditDetails['reason'] = passwordInputValid ? 'incorrect' : 'invalid_input';
+        const details = {
+          factor: 'password' as const,
+          reason,
+          failureCount,
+        };
+        addSuperAdminAuditEvent(transaction, 'password_verification_failure', user.uid, details, now);
+        addSuperAdminAuditEvent(transaction, 'failed_verification_attempt', user.uid, details, now);
+        if (failures + 1 >= 5) {
+          const nextLockedUntil = now + 15 * 60_000;
+          transaction.set(attemptRef, {
+            failures: 0,
+            lockedUntil: Timestamp.fromMillis(nextLockedUntil),
+            updatedAt: Timestamp.fromMillis(now),
+          });
+          return { status: 'locked' as const, retryAfterSeconds: 15 * 60 };
+        }
+        transaction.set(attemptRef, {
+          failures: failures + 1,
+          lockedUntil: null,
+          updatedAt: Timestamp.fromMillis(now),
+        });
+        return { status: 'invalid' as const };
+      }
+
+      transaction.delete(attemptRef);
+      transaction.set(challengeRef, {
+        uid: user.uid,
+        createdAt: Timestamp.fromMillis(now),
+        expiresAt: Timestamp.fromMillis(expiresAt),
+      });
+      addSuperAdminAuditEvent(
+        transaction,
+        'password_verification_success',
+        user.uid,
+        { factor: 'password' },
+        now
+      );
+      return { status: 'password-verified' as const };
+    });
+
+    if (outcome.status === 'locked') {
+      res.setHeader('Retry-After', String(outcome.retryAfterSeconds));
+      res.status(429).json({ error: 'Too many failed attempts. Try again after the lockout period.' });
+      return;
+    }
+    if (outcome.status === 'invalid') {
+      res.status(passwordInputValid ? 401 : 400).json({
+        error: passwordInputValid ? 'The password was not accepted.' : 'Enter a valid password.',
+      });
+      return;
+    }
+    res.json({ challengeToken, expiresAt });
+  } catch (error) {
+    console.error('[Super Admin] Password verification failed:', error);
+    res.status(503).json({ error: 'Super Admin access verification is temporarily unavailable.' });
+  }
+});
+
+app.post('/api/superadmin/access/owner-verify', rateLimit(10, 15 * 60_000), async (req: Request, res: Response) => {
+  const challenge = await requireSuperAdminChallenge(req, res);
+  if (!challenge || !adminDb) return;
+
+  const ownerWord = req.body?.ownerWord;
+  const ownerWordValue = typeof ownerWord === 'string' ? ownerWord : '';
+  const ownerWordInputValid = /^[A-Za-z]{3}$/.test(ownerWordValue);
+
+  const ownerWordConfig = getSuperAdminSecretDigest(SUPER_ADMIN_OWNER_WORD_HASH);
+  if (!ownerWordConfig) {
+    try {
+      await recordSuperAdminAuditEvents(challenge.user.uid, [
+        { event: 'owner_word_verification_failure', details: { factor: 'owner_word', reason: 'configuration_unavailable' } },
+      ]);
+    } catch (error) {
+      console.error('[Super Admin] Could not record owner-word verification failure:', error);
+      res.status(503).json({ error: 'Super Admin audit logging is temporarily unavailable.' });
+      return;
+    }
+    res.status(503).json({ error: 'Owner word verification is not configured on the server.' });
+    return;
+  }
+
+  const ownerWordMatches = ownerWordInputValid && superAdminSecretMatches(ownerWordValue.toUpperCase(), ownerWordConfig);
+  const now = Date.now();
+  const attemptRef = adminDb.collection('super_admin_owner_word_attempts')
+    .doc(createHash('sha256').update(challenge.user.uid).digest('hex'));
+  const challengeRef = adminDb.collection('super_admin_access_challenges').doc(challenge.challengeId);
+  const sessionToken = randomBytes(32).toString('base64url');
+  const sessionId = createHash('sha256').update(sessionToken).digest('hex');
+  const sessionRef = adminDb.collection('super_admin_access_sessions').doc(sessionId);
+  const authorizationRef = adminDb.collection(SUPER_ADMIN_AUTHORIZATIONS).doc(challenge.user.uid);
+
+  try {
+    const outcome = await adminDb.runTransaction(async (transaction) => {
+      const attemptSnapshot = await transaction.get(attemptRef);
+      const challengeSnapshot = await transaction.get(challengeRef);
+      const challengeData = challengeSnapshot.data();
+      const challengeExpiresAt = firestoreMillis(challengeData?.expiresAt);
+      if (
+        !challengeSnapshot.exists ||
+        challengeData?.uid !== challenge.user.uid ||
+        !challengeExpiresAt ||
+        challengeExpiresAt <= now
+      ) {
+        const details = { factor: 'owner_word' as const, reason: 'challenge_expired' as const };
+        addSuperAdminAuditEvent(transaction, 'owner_word_verification_failure', challenge.user.uid, details, now);
+        addSuperAdminAuditEvent(transaction, 'failed_verification_attempt', challenge.user.uid, details, now);
+        return { status: 'challenge-expired' as const };
+      }
+
+      const attemptData = attemptSnapshot.data();
+      const lockedUntil = firestoreMillis(attemptData?.lockedUntil);
+      if (lockedUntil && lockedUntil > now) {
+        const details = { factor: 'owner_word' as const, reason: 'locked' as const, failureCount: 5 };
+        addSuperAdminAuditEvent(transaction, 'owner_word_verification_failure', challenge.user.uid, details, now);
+        addSuperAdminAuditEvent(transaction, 'failed_verification_attempt', challenge.user.uid, details, now);
+        return { status: 'locked' as const, retryAfterSeconds: Math.ceil((lockedUntil - now) / 1000) };
+      }
+
+      if (!ownerWordMatches) {
+        const failures = Number(attemptData?.failures) || 0;
+        const failureCount = failures + 1;
+        const reason: SuperAdminAuditDetails['reason'] = ownerWordInputValid ? 'incorrect' : 'invalid_input';
+        const details = { factor: 'owner_word' as const, reason, failureCount };
+        addSuperAdminAuditEvent(transaction, 'owner_word_verification_failure', challenge.user.uid, details, now);
+        addSuperAdminAuditEvent(transaction, 'failed_verification_attempt', challenge.user.uid, details, now);
+        if (failures + 1 >= 5) {
+          const nextLockedUntil = now + 15 * 60_000;
+          transaction.set(attemptRef, {
+            failures: 0,
+            lockedUntil: Timestamp.fromMillis(nextLockedUntil),
+            updatedAt: Timestamp.fromMillis(now),
+          });
+          transaction.delete(challengeRef);
+          return { status: 'locked' as const, retryAfterSeconds: 15 * 60 };
+        }
+        transaction.set(attemptRef, {
+          failures: failures + 1,
+          lockedUntil: null,
+          updatedAt: Timestamp.fromMillis(now),
+        });
+        return { status: 'invalid' as const };
+      }
+
+      transaction.delete(attemptRef);
+      transaction.delete(challengeRef);
+      transaction.set(sessionRef, {
+        uid: challenge.user.uid,
+        createdAt: Timestamp.fromMillis(now),
+      });
+      transaction.set(authorizationRef, {
+        active: true,
+        updatedAt: Timestamp.fromMillis(now),
+      });
+      addSuperAdminAuditEvent(
+        transaction,
+        'owner_word_verification_success',
+        challenge.user.uid,
+        { factor: 'owner_word' },
+        now
+      );
+      addSuperAdminAuditEvent(
+        transaction,
+        'super_admin_session_created',
+        challenge.user.uid,
+        {},
+        now
+      );
+      return { status: 'verified' as const };
+    });
+
+    if (outcome.status === 'challenge-expired') {
+      res.status(401).json({ error: 'The password verification expired. Start verification again.' });
+      return;
+    }
+    if (outcome.status === 'locked') {
+      res.setHeader('Retry-After', String(outcome.retryAfterSeconds));
+      res.status(429).json({ error: 'Too many failed owner-word attempts. Try again after the lockout period.' });
+      return;
+    }
+    if (outcome.status === 'invalid') {
+      res.status(ownerWordInputValid ? 401 : 400).json({
+        error: ownerWordInputValid ? 'The owner word was not accepted.' : 'Enter the 3-letter owner verification word.',
+      });
+      return;
+    }
+    res.json({ sessionToken });
+  } catch (error) {
+    console.error('[Super Admin] Owner word verification failed:', error);
+    res.status(503).json({ error: 'Owner word verification is temporarily unavailable.' });
+  }
+});
+
+app.post('/api/superadmin/access/revoke', rateLimit(20, 15 * 60_000), async (req: Request, res: Response) => {
+  const user = await requireSuperAdminSession(req, res);
+  if (!user || !adminDb) return;
+
+  const sessionToken = req.header('x-super-admin-session') || '';
+  const sessionId = createHash('sha256').update(sessionToken).digest('hex');
+  const sessionRef = adminDb.collection('super_admin_access_sessions').doc(sessionId);
+  const authorizationRef = adminDb.collection(SUPER_ADMIN_AUTHORIZATIONS).doc(user.uid);
+  const sessionsQuery = adminDb.collection('super_admin_access_sessions').where('uid', '==', user.uid);
+  const now = Date.now();
+  try {
+    const outcome = await adminDb.runTransaction(async (transaction) => {
+      const [session, sessions] = await Promise.all([
+        transaction.get(sessionRef),
+        transaction.get(sessionsQuery),
+      ]);
+      if (!session.exists || session.data()?.uid !== user.uid) return 'already-revoked' as const;
+
+      transaction.delete(sessionRef);
+      const otherActiveSessions = sessions.docs.filter((candidate) =>
+        candidate.id !== sessionId && candidate.data().uid === user.uid && !sessionHasExpired(candidate.data(), now)
+      );
+      if (otherActiveSessions.length === 0) transaction.delete(authorizationRef);
+      addSuperAdminAuditEvent(transaction, 'super_admin_logout', user.uid, {}, now);
+      return 'revoked' as const;
+    });
+    if (outcome !== 'revoked') {
+      res.status(401).json({ error: 'The Super Admin session has already ended.' });
+      return;
+    }
+    res.json({ revoked: true });
+  } catch (error) {
+    console.error('[Super Admin] Could not revoke access session:', error);
+    res.status(503).json({ error: 'Super Admin access session could not be revoked.' });
+  }
+});
 
 async function requireActiveVaultUser(req: Request, res: Response) {
   const user = await requireApiUser(req, res);
@@ -469,6 +1017,7 @@ async function requireAdminChatUser(req: Request, res: Response): Promise<(Verif
     return null;
   }
   const isSuper = SUPER_ADMIN_EMAILS.has(user.email);
+  if (isSuper && !(await validateSuperAdminSession(user, req, res))) return null;
   const adminRecord = await adminDb.collection('admins').doc(user.uid).get();
   if (!isSuper && !adminRecord.exists) {
     res.status(403).json({ error: 'Administrator access required.' });
@@ -786,34 +1335,149 @@ app.post('/api/recovery/issue', rateLimit(3, 10 * 60_000), async (req: Request, 
   }
 
   try {
+    if (!(await hasRecentAuthentication(user))) {
+      res.status(401).json({ error: 'Sign in again before requesting a recovery code.' });
+      return;
+    }
     const account = await adminAuth.getUser(user.uid);
-    const code = generateRecoveryCode();
-    const salt = randomBytes(16);
-    const now = Date.now();
-    const requestRef = adminDb.collection('recovery_requests').doc(recoveryLookupId(code));
-
-    await requestRef.set({
-      uid: user.uid,
-      email: normalizeEmail(account.email || user.email),
-      displayName: account.displayName || '',
-      codeHash: hashRecoveryCode(code, salt).toString('hex'),
-      codeSalt: salt.toString('hex'),
-      status: 'issued',
-      attempts: 0,
-      createdAt: Timestamp.fromMillis(now),
-      expiresAt: Timestamp.fromMillis(now + RECOVERY_CODE_TTL_MS),
-    });
-
-    await notifyRecoveryAdmins(
-      `[Vault X] Recovery code issued for UID ${user.uid}`,
-      `A recovery code was issued for a Vault X account. No recovery code is included in this notification.\n\nUID: ${user.uid}\nAccount email: ${account.email || user.email}\nThe code expires in 24 hours and can only be used once. An admin approval is required before any email change can happen.`,
-      { UID: user.uid, 'Account email': account.email || user.email, Expiration: '24 hours; one-time use' }
-    );
-
-    res.json({ code, expiresAt: now + RECOVERY_CODE_TTL_MS });
+    const recoveryCode = await issueRecoveryCodeForAccount(account);
+    res.json(recoveryCode);
   } catch (error) {
     console.error('[Recovery] Could not issue recovery code:', error);
     res.status(500).json({ error: 'Could not issue a recovery code.' });
+  }
+});
+
+app.post('/api/recovery/verification/request', rateLimit(3, 10 * 60_000), async (req: Request, res: Response) => {
+  const user = await requireApiUser(req, res);
+  if (!user) return;
+  if (!adminDb || !adminAuth) {
+    res.status(503).json({ error: 'Secure recovery is not configured on the server yet.' });
+    return;
+  }
+
+  try {
+    const account = await adminAuth.getUser(user.uid);
+    const isGoogleAccount = account.providerData.some((provider) => provider.providerId === 'google.com');
+    if (!isGoogleAccount || !account.emailVerified || !account.email) {
+      res.status(403).json({ error: 'Email verification is available to accounts with a verified Google email.' });
+      return;
+    }
+
+    const now = Date.now();
+    const verificationRef = adminDb.collection('recovery_code_verifications').doc(user.uid);
+    const previous = await verificationRef.get();
+    const previousData = previous.data();
+    const previousCreatedAt = previousData?.createdAt?.toMillis?.() || 0;
+    if (previousData?.status === 'pending' && now - previousCreatedAt < 60_000) {
+      res.status(429).json({ error: 'A verification code was sent recently. Check your email or try again shortly.' });
+      return;
+    }
+
+    const code = String(randomInt(0, 1_000_000)).padStart(6, '0');
+    const salt = randomBytes(16);
+    await verificationRef.set({
+      uid: user.uid,
+      email: normalizeEmail(account.email),
+      codeHash: hashRecoveryCode(code, salt).toString('hex'),
+      codeSalt: salt.toString('hex'),
+      status: 'pending',
+      attempts: 0,
+      createdAt: Timestamp.fromMillis(now),
+      expiresAt: Timestamp.fromMillis(now + RECOVERY_VERIFICATION_TTL_MS),
+    });
+
+    const delivery = await dispatchEmailNotification({
+      recipientEmail: account.email,
+      subject: '[VAULT-X] Recovery code verification',
+      replyTo: SUPPORT_EMAIL,
+      fields: {
+        Message: 'Use this code to verify your identity and issue a new Vault X recovery code.',
+        'Verification code': code,
+        Expiration: '10 minutes',
+      },
+      textContent: `Use this verification code to issue a new Vault X recovery code:\n\n${code}\n\nIt expires in 10 minutes. If you did not request this, you can ignore this email.`,
+    });
+    if (!delivery.sent) {
+      await verificationRef.update({ status: 'delivery_failed', updatedAt: Timestamp.now() });
+      console.error('[Recovery] Could not deliver Google verification code:', delivery.message);
+      res.status(502).json({ error: 'Could not deliver the verification email. Please try again later.' });
+      return;
+    }
+
+    res.json({ message: 'A verification code was sent to your Google account email. It expires in 10 minutes.' });
+  } catch (error) {
+    console.error('[Recovery] Could not send Google verification code:', error);
+    res.status(500).json({ error: 'Could not send the verification email.' });
+  }
+});
+
+app.post('/api/recovery/verification/confirm', rateLimit(10, 10 * 60_000), async (req: Request, res: Response) => {
+  const user = await requireApiUser(req, res);
+  if (!user) return;
+  const code = String(req.body?.code || '').trim();
+  if (!/^\d{6}$/.test(code)) {
+    res.status(400).json({ error: 'Enter the 6-digit verification code from your email.' });
+    return;
+  }
+  if (!adminDb || !adminAuth) {
+    res.status(503).json({ error: 'Secure recovery is not configured on the server yet.' });
+    return;
+  }
+
+  try {
+    const account = await adminAuth.getUser(user.uid);
+    const isGoogleAccount = account.providerData.some((provider) => provider.providerId === 'google.com');
+    if (!isGoogleAccount || !account.emailVerified || !account.email) {
+      res.status(403).json({ error: 'Email verification is available to accounts with a verified Google email.' });
+      return;
+    }
+
+    const verificationRef = adminDb.collection('recovery_code_verifications').doc(user.uid);
+    const now = Date.now();
+    const result = await adminDb.runTransaction(async (transaction) => {
+      const snapshot = await transaction.get(verificationRef);
+      const verification = snapshot.data();
+      const expiresAt = verification?.expiresAt?.toMillis?.() || 0;
+      if (!snapshot.exists || verification?.status !== 'pending' || expiresAt <= now ||
+        normalizeEmail(verification?.email) !== normalizeEmail(account.email)) {
+        return 'expired' as const;
+      }
+
+      const attempts = Number(verification.attempts || 0) + 1;
+      if (!recoveryCodeMatches(code, String(verification.codeSalt), String(verification.codeHash))) {
+        const locked = attempts >= RECOVERY_VERIFICATION_MAX_ATTEMPTS;
+        transaction.update(verificationRef, {
+          attempts,
+          ...(locked ? { status: 'locked' } : {}),
+          updatedAt: Timestamp.fromMillis(now),
+        });
+        return locked ? 'locked' as const : 'invalid' as const;
+      }
+
+      transaction.update(verificationRef, {
+        status: 'used',
+        attempts,
+        verifiedAt: Timestamp.fromMillis(now),
+      });
+      return 'verified' as const;
+    });
+
+    if (result !== 'verified') {
+      const isLocked = result === 'locked';
+      res.status(isLocked ? 429 : 400).json({
+        error: isLocked
+          ? 'Too many incorrect attempts. Request a new verification code.'
+          : 'The verification code is invalid or expired.',
+      });
+      return;
+    }
+
+    const recoveryCode = await issueRecoveryCodeForAccount(account);
+    res.json(recoveryCode);
+  } catch (error) {
+    console.error('[Recovery] Could not verify email code:', error);
+    res.status(500).json({ error: 'Could not verify the email code or issue a recovery code.' });
   }
 });
 
@@ -834,15 +1498,12 @@ app.post('/api/recovery/request-email-change', rateLimit(5, 10 * 60_000), async 
     const snapshot = await requestRef.get();
     const request = snapshot.data();
     if (!snapshot.exists || !request) {
-      res.status(400).json({ error: 'The code is invalid or expired.' });
+      res.status(400).json({ error: 'The code is invalid, already used, or replaced.' });
       return;
     }
 
-    // Apply the TTL to legacy records too, using createdAt when expiresAt is absent.
-    const expiresAt = request.expiresAt?.toMillis?.() ??
-      ((request.createdAt?.toMillis?.() || 0) + RECOVERY_CODE_TTL_MS);
-    if (request.status !== 'issued' || expiresAt <= Date.now()) {
-      res.status(400).json({ error: 'The code is invalid or expired.' });
+    if (request.status !== 'issued') {
+      res.status(400).json({ error: 'The code is invalid, already used, or replaced.' });
       return;
     }
 
@@ -854,7 +1515,7 @@ app.post('/api/recovery/request-email-change', rateLimit(5, 10 * 60_000), async 
     }
     if (!recoveryCodeMatches(code, String(request.codeSalt), String(request.codeHash))) {
       await requestRef.update({ attempts, updatedAt: Timestamp.now() });
-      res.status(400).json({ error: 'The code is invalid or expired.' });
+      res.status(400).json({ error: 'The code is invalid.' });
       return;
     }
 
@@ -881,144 +1542,6 @@ app.post('/api/recovery/request-email-change', rateLimit(5, 10 * 60_000), async 
   } catch (error) {
     console.error('[Recovery] Could not process email recovery request:', error);
     res.status(500).json({ error: 'Could not process the recovery request.' });
-  }
-});
-
-app.post('/api/vault/recovery-email/request', rateLimit(3, 10 * 60_000), async (req: Request, res: Response) => {
-  const user = await requireActiveVaultUser(req, res);
-  if (!user) return;
-  if (!adminDb || !adminAuth) {
-    res.status(503).json({ error: 'Vault recovery email is not configured.' });
-    return;
-  }
-  try {
-    const account = await adminAuth.getUser(user.uid);
-    const isGoogleAccount = account.providerData.some((provider) => provider.providerId === 'google.com');
-    if (!isGoogleAccount || !account.emailVerified || !account.email) {
-      res.status(400).json({ error: 'This recovery email is available to verified Google sign-in accounts.' });
-      return;
-    }
-    const token = randomBytes(32).toString('base64url');
-    const tokenHash = createHash('sha256').update(token).digest('hex');
-    const now = Date.now();
-    await adminDb.collection('vault_recovery_email_tokens').doc(tokenHash).set({
-      uid: user.uid,
-      email: account.email,
-      status: 'issued',
-      createdAt: Timestamp.fromMillis(now),
-      expiresAt: Timestamp.fromMillis(now + 15 * 60_000),
-    });
-    const appUrl = (process.env.APP_URL || (process.env.NODE_ENV === 'production'
-      ? 'https://glinnux.github.io/Vault-X/'
-      : 'http://localhost:3000/')).replace(/\/+$/, '/');
-    const recoveryLink = `${appUrl}#vault-recovery=${encodeURIComponent(token)}`;
-    const delivery = await dispatchEmailNotification({
-      recipientEmail: account.email,
-      subject: '[VAULT-X] Confirm your vault recovery request',
-      replyTo: SUPPORT_EMAIL,
-      fields: {
-        Message: 'Confirm your Vault X recovery request using the secure link in this email.',
-        'Confirmation link': recoveryLink,
-      },
-      textContent: `A request was made to reset your Vault X password. Confirm that you control this Google account by opening the link below within 15 minutes. You will still need your separate recovery key to unlock the vault.\n\n${recoveryLink}\n\nIf you did not request this, ignore this message.`,
-      htmlContent: `<p>A request was made to reset your Vault X password.</p><p>Confirm that you control this Google account by opening the link below within 15 minutes. You will still need your separate recovery key to unlock the vault.</p><p><a href="${recoveryLink}">Confirm and continue vault recovery</a></p><p>If you did not request this, ignore this message.</p>`,
-    });
-    if (!delivery.sent) {
-      await adminDb.collection('vault_recovery_email_tokens').doc(tokenHash).update({ status: 'delivery_failed' });
-      res.status(502).json({ error: 'Could not deliver the recovery email. Please try again later.' });
-      return;
-    }
-    res.json({ message: 'A one-time confirmation link was sent to your verified Google email. It expires in 15 minutes.' });
-  } catch (error) {
-    console.error('[Vault Recovery] Could not send confirmation email:', error);
-    res.status(500).json({ error: 'Could not send the vault recovery email.' });
-  }
-});
-
-app.post('/api/vault/recovery-email/confirm', rateLimit(10, 10 * 60_000), async (req: Request, res: Response) => {
-  const token = String(req.body?.token || '');
-  if (!/^[A-Za-z0-9_-]{40,50}$/.test(token) || !adminDb) {
-    res.status(400).json({ error: 'This recovery link is invalid or expired.' });
-    return;
-  }
-  const tokenHash = createHash('sha256').update(token).digest('hex');
-  const recoveryTicket = randomBytes(32).toString('base64url');
-  const now = Date.now();
-  const requestRef = adminDb.collection('vault_recovery_email_tokens').doc(tokenHash);
-  const ticketRef = adminDb.collection('vault_recovery_tickets').doc(createHash('sha256').update(recoveryTicket).digest('hex'));
-  try {
-    await adminDb.runTransaction(async (transaction) => {
-      const requestSnapshot = await transaction.get(requestRef);
-      const request = requestSnapshot.data();
-      if (!requestSnapshot.exists || request?.status !== 'issued' ||
-          !request.expiresAt || request.expiresAt.toMillis() <= now) {
-        throw new Error('INVALID_OR_EXPIRED');
-      }
-      transaction.update(requestRef, { status: 'confirmed', confirmedAt: Timestamp.fromMillis(now) });
-      transaction.create(ticketRef, {
-        uid: request.uid,
-        requestId: tokenHash,
-        status: 'ready',
-        createdAt: Timestamp.fromMillis(now),
-        expiresAt: Timestamp.fromMillis(now + 15 * 60_000),
-      });
-    });
-    res.json({ ticket: recoveryTicket, expiresAt: now + 15 * 60_000 });
-  } catch (error) {
-    if (error instanceof Error && error.message === 'INVALID_OR_EXPIRED') {
-      res.status(400).json({ error: 'This recovery link is invalid, expired, or already used.' });
-      return;
-    }
-    console.error('[Vault Recovery] Could not confirm email link:', error);
-    res.status(500).json({ error: 'Could not confirm the recovery link.' });
-  }
-});
-
-app.post('/api/vault/recovery-email/complete', rateLimit(5, 10 * 60_000), async (req: Request, res: Response) => {
-  const user = await requireActiveVaultUser(req, res);
-  if (!user || !adminDb) return;
-  const ticket = String(req.body?.ticket || '');
-  const passwordSalt = String(req.body?.passwordSalt || '');
-  const passwordIv = String(req.body?.passwordIv || '');
-  const passwordWrappedKey = String(req.body?.passwordWrappedKey || '');
-  const recoveryIv = String(req.body?.recoveryIv || '');
-  const recoveryWrappedKey = String(req.body?.recoveryWrappedKey || '');
-  if (!/^[A-Za-z0-9_-]{40,50}$/.test(ticket) || !/^[A-Za-z0-9+/]{20,30}={0,2}$/.test(passwordSalt) ||
-      !/^[A-Za-z0-9+/]{16}={0,2}$/.test(passwordIv) || !/^[A-Za-z0-9+/]{40,100}={0,2}$/.test(passwordWrappedKey) ||
-      !/^[A-Za-z0-9+/]{16}={0,2}$/.test(recoveryIv) || !/^[A-Za-z0-9+/]{40,100}={0,2}$/.test(recoveryWrappedKey)) {
-    res.status(400).json({ error: 'The recovery details are invalid.' });
-    return;
-  }
-  const ticketId = createHash('sha256').update(ticket).digest('hex');
-  const ticketRef = adminDb.collection('vault_recovery_tickets').doc(ticketId);
-  const envelopeRef = adminDb.collection('users').doc(user.uid).collection('security').doc('vaultKey');
-  try {
-    await adminDb.runTransaction(async (transaction) => {
-      const ticketSnapshot = await transaction.get(ticketRef);
-      const envelopeSnapshot = await transaction.get(envelopeRef);
-      const ticketData = ticketSnapshot.data();
-      if (!ticketSnapshot.exists || ticketData?.uid !== user.uid || ticketData?.status !== 'ready' ||
-          !ticketData.expiresAt || ticketData.expiresAt.toMillis() <= Date.now() || !envelopeSnapshot.exists) {
-        throw new Error('INVALID_TICKET');
-      }
-      transaction.update(ticketRef, { status: 'used', usedAt: Timestamp.now() });
-      transaction.update(envelopeRef, {
-        passwordSalt,
-        passwordIv,
-        passwordWrappedKey,
-        recoveryIv,
-        recoveryWrappedKey,
-        updatedAt: Timestamp.now(),
-      });
-    });
-    res.json({ message: 'Vault password reset completed. Unlock using your new password.' });
-  } catch (error) {
-    if (error instanceof Error && error.message === 'INVALID_TICKET') {
-      res.status(400).json({ error: 'The recovery confirmation expired or was already used. Request a new email.' });
-      return;
-    }
-    console.error('[Vault Recovery] Could not complete password reset:', error);
-    res.status(500).json({ error: 'Could not complete vault password recovery.' });
   }
 });
 
@@ -1088,6 +1611,24 @@ app.post('/api/admin/recovery-requests/:id/decision', async (req: Request, res: 
     await adminDb.collection('users').doc(request.uid).set({ email: proposedEmail, updatedAt: Timestamp.now() }, { merge: true });
     await requestRef.update({ status: 'approved', approvedBy: user.uid, approvedAt: Timestamp.now(), usedAt: Timestamp.now() });
 
+    const updatedAccount = await adminAuth.getUser(request.uid);
+    const recoveryCode = await issueRecoveryCodeForAccount(updatedAccount);
+    const approvalEmail = await dispatchEmailNotification({
+      recipientEmail: proposedEmail,
+      replyTo: SUPPORT_EMAIL,
+      subject: '[VAULT-X] Your email change request was accepted',
+      fields: {
+        Message: 'Your Vault X email change request has been approved.',
+        'New sign-in email': proposedEmail,
+        'New one-time Vault X recovery code': recoveryCode.code,
+      },
+      textContent: `Your Vault X email change request has been accepted. Your account email is now ${proposedEmail}. You can use this address the next time you sign in.\n\nYour new one-time Vault X recovery code is:\n${recoveryCode.code}\n\nStore it somewhere private. This code stays valid until it is used or replaced, and it replaces any previous unused recovery code.`,
+      allowFallback: false,
+    });
+    if (!approvalEmail.sent) {
+      console.error(`[Recovery] Email change and recovery code were issued, but their email could not be delivered to ${proposedEmail}:`, approvalEmail.message);
+    }
+
     await notifySuperAdminsOfActivity(
       user.email,
       'recovery_request_decided',
@@ -1095,7 +1636,11 @@ app.post('/api/admin/recovery-requests/:id/decision', async (req: Request, res: 
       proposedEmail,
       'Recovery email change request approved.'
     );
-    res.json({ message: 'Recovery approved. The user can now sign in with the new email address.' });
+    res.json({
+      message: approvalEmail.sent
+        ? 'Recovery approved. The acceptance email and new recovery code were sent to the new address.'
+        : 'Recovery approved and a new code was issued, but the email could not be delivered. Check SMTP configuration and issue a new code after delivery is available.',
+    });
   } catch (error) {
     console.error('[Recovery] Could not decide recovery request:', error);
     res.status(500).json({ error: 'Could not update the recovery request.' });
@@ -1116,25 +1661,22 @@ if (apiKey && apiKey !== 'MY_GEMINI_API_KEY' && !apiKey.startsWith('MY_')) {
   });
 }
 
-// System instruction enforcing Vault Information Storage Guidance and Email routing for abstract inquiries/complaints
-const SYSTEM_INSTRUCTION = `You are the CyberVault Storage & Security Assistant, an intelligent guide embedded inside the Clockin Vault web application.
+// Keep product guidance aligned with the features shipped in the current UI.
+const SYSTEM_INSTRUCTION = `You are the Vault-X help assistant. Help users understand the features that actually exist in the current app.
 
 PRIMARY MISSION:
 Guide authenticated users on how to store, organize, protect, and manage their sensitive information in the vault:
 1. Storing Credentials & Passwords:
-   - Click the "+ Add Item" button in the upper toolbar.
-   - Select the "Password / Credential" tab.
-   - Enter Title (e.g. "Work Email", "AWS Console"), Service/Website, and Username/Email.
-   - For Passwords, users can type their own or click the Magic Wand / Generate button to create strong random passwords with customizable length and character sets.
-   - Add optional URL and encrypted secret notes.
+   - Click "Add Credential" and choose a credential or document in the form.
+   - Enter information in the fields the form provides, such as title, service, username, password, and URL.
+   - The form includes a category selector, favorite option, notes, and supported file attachments.
+   - There is no password generator or Magic Wand in the current interface. Users enter their password in the password field.
 2. Storing Secure Documents & Private Notes:
-   - Select "+ Add Item" and switch to the "Secure Document" tab.
-   - Store passport info, recovery seeds, API tokens, license keys, medical notes, or bank account details.
+   - Choose the document type in the add form and use its confidential content/notes field or supported file attachment.
 3. Organization & Management:
-   - Use Categories: Personal, Work, Finance, Social, Document.
-   - Attach comma-separated tags (e.g., "primary, critical, 2fa").
-   - Star any card to mark it as a Favorite for quick 1-click filtering.
-   - Search instantly by title, username, service, or tags using the Cyber Search bar.
+   - Built-in categories are Social, Work, Personal, Finance, Document, and Other. Users cannot create tags or custom categories in the current interface.
+   - Star an item to mark it as a Favorite. The header can filter by all items, credentials, documents, or favorites.
+   - Search matches item title, service, username, and notes.
 4. Security & Isolation Architecture:
    - Explain that data is isolated per authenticated user in Google Cloud Firestore under /users/{user.uid}/vault/{itemId}.
    - Firestore security rules strictly block other users or unauthenticated clients from reading or modifying vault items.
@@ -1143,6 +1685,12 @@ Guide authenticated users on how to store, organize, protect, and manage their s
    - Paid upgrade: Users can allot 20 more credential slots (for 30 total slots) by paying $4.88 USD or ₦6,500 Naira.
    - The payment is handled via a separate dedicated page showing the official bank account number and transfer instructions.
    - Users can navigate to the upgrade page anytime via the "Upgrade (+20 Slots)" button in the header or the Side Box on their dashboard.
+
+CURRENT FEATURE AND PRICE OVERRIDE:
+- The current add form has no tags, custom categories, or password generator. Do not claim that it does. Available categories are Social, Work, Personal, Finance, Document, and Other. Search covers title, service, username, and notes.
+- Current plans are Free (10 slots), 2-Weekly (30 total slots for 14 days, NGN 2,000), Monthly (50 total slots for 30 days, NGN 8,000), and Yearly (unlimited slots for 365 days, NGN 15,000). These values supersede the obsolete price above. Payment activation requires administrative confirmation.
+- Describe the app as encrypting vault values in the browser and isolating records with owner-scoped Firestore rules. Do not make absolute, quantum-resistant, or other unsupported security claims.
+- Keep replies concise and answer the user directly. Use valid Markdown without escaping its punctuation with backslashes. Only provide a step-by-step guide when the user asks how to do something.
 
 CRITICAL POLICY FOR ABSTRACT INQUIRIES & COMPLAINTS:
 - If the user asks an ABSTRACT INQUIRY (such as unrelated trivia, philosophical questions, jokes, riddles, cooking recipes, general chit-chat, world news, life advice, or queries not related to vault storage and data protection), OR
@@ -1165,15 +1713,21 @@ INTELLIGENT CONVERSATION RULES:
 - Never claim to have completed an action unless the interface actually performed it, and never invent features or security guarantees.`;
 
 const XAI_API_KEY = process.env.XAI_API_KEY?.trim() || '';
+const GROQ_API_KEY = process.env.GROQ_API_KEY?.trim() ||
+  (XAI_API_KEY.startsWith('gsk_') ? XAI_API_KEY : '');
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY?.trim() || '';
-const AI_PROVIDER_API_KEY = XAI_API_KEY || OPENAI_API_KEY;
-const AI_PROVIDER_NAME = XAI_API_KEY ? 'grok' : 'openai';
-const AI_PROVIDER_URL = XAI_API_KEY
-  ? 'https://api.x.ai/v1/responses'
-  : 'https://api.openai.com/v1/responses';
-const AI_PROVIDER_MODEL = XAI_API_KEY
-  ? process.env.XAI_MODEL?.trim() || 'grok-4.7'
-  : process.env.OPENAI_MODEL?.trim() || 'gpt-6-luna';
+const AI_PROVIDER_API_KEY = GROQ_API_KEY || XAI_API_KEY || OPENAI_API_KEY;
+const AI_PROVIDER_NAME = GROQ_API_KEY ? 'groq' : XAI_API_KEY ? 'grok' : 'openai';
+const AI_PROVIDER_URL = GROQ_API_KEY
+  ? 'https://api.groq.com/openai/v1/chat/completions'
+  : XAI_API_KEY
+    ? 'https://api.x.ai/v1/responses'
+    : 'https://api.openai.com/v1/responses';
+const AI_PROVIDER_MODEL = GROQ_API_KEY
+  ? process.env.GROQ_MODEL?.trim() || 'openai/gpt-oss-20b'
+  : XAI_API_KEY
+    ? process.env.XAI_MODEL?.trim() || 'grok-4.7'
+    : process.env.OPENAI_MODEL?.trim() || 'gpt-6-luna';
 
 // Intelligent fallback logic when Gemini API key is unavailable or fails
 function getFallbackResponse(query: string): string {
@@ -1189,46 +1743,51 @@ function getFallbackResponse(query: string): string {
 
   // Password storage
   if (/password|credential|login|passphrase/i.test(q)) {
-    return `### How to Store Passwords in CyberVault:
-1. Click the **"+ Add Item"** button on your dashboard.
-2. Select the **"Password / Credential"** tab.
-3. Fill in the **Title** (e.g., *GitHub Developer*, *Bank Account*).
-4. Enter your **Username / Email**.
-5. Type your password or click the **Wand (Generate)** icon to craft an ultra-secure 16+ character password.
-6. Select a category (**Personal**, **Work**, **Finance**, or **Social**) and add tags (e.g., *critical, dev*).
-7. Click **"Encrypt & Store Record"**. Your password is saved in your private Firestore database!`;
+    return `### Add a Credential
+1. Click **Add Credential** in your vault.
+2. Choose the credential type and fill in the fields shown, such as title, service, username, and password.
+3. Optionally choose a built-in category, mark it as a favorite, add notes, or attach a supported file.
+4. Save the item. There is no password generator or tag field in the current interface.`;
   }
 
   // Document / Note storage
   if (/document|note|passport|seed|license|memo|tax|secure note|text/i.test(q)) {
-    return `### How to Store Secure Documents & Notes:
-1. Click **"+ Add Item"** in the top navigation.
-2. Switch to the **"Secure Document"** tab.
-3. Give your document a title (e.g., *Passport & Visa Numbers*, *Crypto Recovery Seed*, *Server API Keys*).
-4. Paste your sensitive information in the **Secret Content & Notes** field.
-5. Assign a Category and custom tags for rapid filtering.
-6. Click **"Encrypt & Store Record"** to isolate and protect your data.`;
+    return `### Add a Secure Document
+1. Click **Add Credential** and choose a document in the add form.
+2. Enter a title and use the confidential content/notes field or attach a supported file.
+3. Optionally choose a built-in category or mark the item as a favorite, then save it.
+The current interface does not support tags or custom categories.`;
   }
 
   // Security & Encryption
   if (/secure|security|encrypt|safe|hack|firewall|isolation|firestore|database/i.test(q)) {
-    return `### Vault Security & Isolation Protocol:
-- **Per-User Database Isolation**: All your vault entries are stored strictly under \`/users/{your-uid}/vault/{itemId}\` in Google Cloud Firestore.
-- **Server-Enforced Rules**: Firebase security rules ensure that *only your authenticated Google Account* has read or write permissions. No other user can access your vault.
-- **Micro-Decrypt Obfuscation**: Passwords remain concealed behind cyber masks until you explicitly click the reveal eye icon.
-- **Safe Copy**: One-click clipboard copy allows you to paste credentials without exposing them visually.`;
+    return `### Vault Security
+- Vault values are encrypted in your browser before they are stored.
+- Firestore rules scope vault records to their owner.
+- Use a strong vault password and keep your recovery key private. No system can promise perfect security.`;
   }
 
   // Organization & Search
   if (/tag|search|favorite|filter|organize|category|star/i.test(q)) {
     return `### Organizing & Finding Your Information:
-- **Categories**: Filter by *Personal*, *Work*, *Finance*, *Social*, and *Document* using the category selector.
+- **Categories**: Choose Social, Work, Personal, Finance, Document, or Other when editing an item.
 - **Favorites**: Click the **Star icon** on any vault card to pin it to your quick-access Favorites view.
-- **Cyber Search**: Type in the search bar to filter instantly across titles, usernames, domains, and custom tags.
-- **View Modes**: Switch between **All Items**, **Passwords Only**, **Documents Only**, and **Favorites** in the header.`;
+- **Search**: Search matches item title, service, username, and notes. There are no tag filters.
+- **View Modes**: Use the header to view all items, credentials, documents, or favorites.`;
   }
 
-  // Storage Slot Limits, Paid Feature & Payment Page
+  // Current subscription guidance (kept aligned with subscriptionService.ts)
+  if (/slot|upgrade|price|pricing|cost|pay|paid|naira|dollar|account number|bank|buy|plan|tier/i.test(q)) {
+    return `### Vault-X Subscription Plans
+- **Free**: 10 slots.
+- **2-Weekly**: 30 total slots for 14 days, NGN 2,000.
+- **Monthly**: 50 total slots for 30 days, NGN 8,000.
+- **Yearly**: Unlimited slots for 365 days, NGN 15,000.
+
+Check the Subscription page for the current displayed price and terms. Payment activation requires administrative confirmation.`;
+  }
+
+  // Legacy plan response retained below for reference; the current branch above handles these questions.
   if (/slot|upgrade|price|pricing|cost|pay|paid|naira|dollar|account number|bank|buy|plan|tier/i.test(q)) {
     return `### Credential Storage Plans & Paid Upgrade:
 - **Free Plan**: Every normal user is allotted **10 credential slots** free of charge.
@@ -1238,14 +1797,7 @@ function getFallbackResponse(query: string): string {
   }
 
   // General fallback
-  return `### CyberVault Information Storage Guide:
-Welcome to CyberVault! You can store and manage two primary types of data:
-1. **Passwords & Credentials**: Click **"+ Add Item"** -> select **"Password / Credential"** -> enter service, username, and password.
-2. **Encrypted Documents & Notes**: Click **"+ Add Item"** -> select **"Secure Document"** -> store confidential text, seeds, and records.
-
-All data is strictly isolated to your authenticated account.
-
-*Note: For any abstract inquiry, bug report, or complaint, please send an email directly to the administrator at **${SUPPORT_EMAIL}**.*`;
+  return `Welcome to Vault-X. You can save credentials and secure documents, organize items with built-in categories and favorites, and search your vault. Ask me about a specific feature and I’ll walk you through it.`;
 }
 
 // Chat API endpoint
@@ -1294,8 +1846,8 @@ app.post('/api/chat', rateLimit(20, 60_000), async (req: Request, res: Response)
         })
       : '{}';
 
-    // Prefer Grok when XAI_API_KEY is configured, otherwise OpenAI. Provider
-    // secrets stay on this server; Gemini and built-in responses remain fallbacks.
+    // Prefer Groq, then Grok, then OpenAI. Provider secrets stay on this server;
+    // Gemini and built-in responses remain fallbacks.
     if (AI_PROVIDER_API_KEY) {
       try {
         const input: Array<{ role: 'user' | 'assistant'; content: string }> = [];
@@ -1312,19 +1864,30 @@ app.post('/api/chat', rateLimit(20, 60_000), async (req: Request, res: Response)
         input.push({ role: 'user', content: `Safe vault summary (counts/categories only; contains no vault secrets): ${safeSummary}` });
         input.push({ role: 'user', content: trimmed });
 
+        const isGroq = AI_PROVIDER_NAME === 'groq';
         const aiResponse = await fetch(AI_PROVIDER_URL, {
           method: 'POST',
           headers: {
             Authorization: `Bearer ${AI_PROVIDER_API_KEY}`,
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({
-            model: AI_PROVIDER_MODEL,
-            instructions: SYSTEM_INSTRUCTION,
-            input,
-            max_output_tokens: 700,
-            store: false,
-          }),
+          body: JSON.stringify(isGroq
+            ? {
+                model: AI_PROVIDER_MODEL,
+                messages: [
+                  { role: 'system', content: SYSTEM_INSTRUCTION },
+                  ...input.map((item) => ({ role: item.role, content: item.content })),
+                ],
+                max_completion_tokens: 700,
+                temperature: 0.3,
+              }
+            : {
+                model: AI_PROVIDER_MODEL,
+                instructions: SYSTEM_INSTRUCTION,
+                input,
+                max_output_tokens: 700,
+                store: false,
+              }),
           signal: AbortSignal.timeout(15000),
         });
 
@@ -1338,8 +1901,13 @@ app.post('/api/chat', rateLimit(20, 60_000), async (req: Request, res: Response)
         const aiData = await aiResponse.json() as {
           output_text?: string;
           output?: Array<{ content?: Array<{ type?: string; text?: string }> }>;
+          choices?: Array<{ message?: { content?: string | Array<{ text?: string }> } }>;
         };
-        const replyText = (aiData.output_text || aiData.output
+        const groqContent = aiData.choices?.[0]?.message?.content;
+        const groqReply = typeof groqContent === 'string'
+          ? groqContent
+          : groqContent?.map((part) => part.text || '').join('\n');
+        const replyText = (groqReply || aiData.output_text || aiData.output
           ?.flatMap((item) => item.content || [])
           .filter((content) => content.type === 'output_text' && typeof content.text === 'string')
           .map((content) => content.text)
@@ -1572,6 +2140,7 @@ async function dispatchEmailNotification({
   htmlContent,
   recipientEmail = SUPPORT_EMAIL,
   attachments,
+  allowFallback = true,
 }: {
   subject: string;
   replyTo?: string;
@@ -1580,6 +2149,7 @@ async function dispatchEmailNotification({
   htmlContent?: string;
   recipientEmail?: string;
   attachments?: Array<{ filename: string; content: Buffer; contentType?: string }>;
+  allowFallback?: boolean;
 }): Promise<{ sent: boolean; method: string; message: string }> {
   const smtpHost = process.env.SMTP_HOST;
   const smtpUser = process.env.SMTP_USER || process.env.EMAIL_USER;
@@ -1615,8 +2185,20 @@ async function dispatchEmailNotification({
         message: `Directly delivered to ${recipientEmail} via SMTP.`,
       };
     } catch (smtpErr) {
-      console.error('[Email Dispatch] SMTP failed, attempting fallback gateway:', smtpErr);
+      console.error(
+        allowFallback
+          ? '[Email Dispatch] SMTP failed, attempting fallback gateway:'
+          : '[Email Dispatch] SMTP failed for an email that must not use a fallback gateway:',
+        smtpErr
+      );
+      if (!allowFallback) {
+        return { sent: false, method: 'smtp-error', message: 'SMTP email delivery failed.' };
+      }
     }
+  }
+
+  if (!allowFallback) {
+    return { sent: false, method: 'smtp-not-configured', message: 'SMTP email delivery is not configured.' };
   }
 
   // 2. Gateway Dispatch via FormSubmit
@@ -1714,6 +2296,7 @@ app.get('/api/admin/notification-preferences', async (req: Request, res: Respons
     res.status(403).json({ error: 'Only super admins can manage notification recipients.' });
     return;
   }
+  if (!(await validateSuperAdminSession(user, req, res))) return;
   if (!adminDb) {
     res.status(503).json({ error: 'Admin notification settings are not configured on the server.' });
     return;
@@ -1750,6 +2333,7 @@ app.put('/api/admin/notification-preferences', async (req: Request, res: Respons
     res.status(403).json({ error: 'Only super admins can manage notification recipients.' });
     return;
   }
+  if (!(await validateSuperAdminSession(user, req, res))) return;
   if (!adminDb) {
     res.status(503).json({ error: 'Admin notification settings are not configured on the server.' });
     return;
@@ -1815,6 +2399,7 @@ app.post('/api/admin/activity-notification', rateLimit(20, 60_000), async (req: 
     res.status(403).json({ error: 'Only super admins can unban accounts.' });
     return;
   }
+  if (action === 'user_unbanned' && !(await validateSuperAdminSession(user, req, res))) return;
 
   const targetUid = String(req.body?.targetUid || '').trim();
   const targetEmail = normalizeEmail(req.body?.targetEmail);
@@ -1837,6 +2422,83 @@ app.post('/api/admin/activity-notification', rateLimit(20, 60_000), async (req: 
       ? 'Super-admin notification emails delivered.'
       : 'The admin action was recorded, but one or more notification emails could not be delivered.',
   });
+});
+
+app.get('/api/admin/overview', rateLimit(10, 60_000), async (req: Request, res: Response) => {
+  const user = await requireApiUser(req, res);
+  if (!user) return;
+  if (SUPER_ADMIN_EMAILS.has(user.email) && !(await validateSuperAdminSession(user, req, res))) return;
+  if (!adminDb || !adminAuth) {
+    res.status(503).json({ error: 'Admin overview data is temporarily unavailable.' });
+    return;
+  }
+
+  try {
+    const isSuperAdmin = SUPER_ADMIN_EMAILS.has(user.email);
+    const adminRecord = isSuperAdmin ? null : await adminDb.collection('admins').doc(user.uid).get();
+    if (!isSuperAdmin && !adminRecord?.exists) {
+      res.status(403).json({ error: 'Administrator access is required.' });
+      return;
+    }
+
+    const permissions = adminRecord?.data()?.permissions || {};
+    const canViewUserDirectory = isSuperAdmin ||
+      permissions.viewFullUserInfo === true ||
+      permissions.giveSlots === true ||
+      permissions.banUsers === true ||
+      permissions.addAdmins === true;
+    const [credentialCount, documentCount, recentUsersSnapshot] = await Promise.all([
+      adminDb.collectionGroup('vault').where('type', '==', 'credential').count().get(),
+      adminDb.collectionGroup('vault').where('type', '==', 'document').count().get(),
+      canViewUserDirectory ? adminDb.collection('users')
+        .select('email', 'displayName', 'createdAt')
+        .orderBy('createdAt', 'desc')
+        .limit(5)
+        .get() : Promise.resolve(null),
+    ]);
+
+    const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
+    let totalUsers = 0;
+    let activeUsers = 0;
+    let pageToken: string | undefined;
+    do {
+      const page = await adminAuth.listUsers(1000, pageToken);
+      totalUsers += page.users.length;
+      activeUsers += page.users.filter((account) => {
+        const lastSignIn = Date.parse(account.metadata.lastSignInTime || '');
+        return Number.isFinite(lastSignIn) && lastSignIn >= cutoff;
+      }).length;
+      pageToken = page.pageToken;
+    } while (pageToken);
+
+    const canViewFullUserInfo = user.permissions.viewFullUserInfo === true || isSuperAdmin;
+    const recentUsers = (recentUsersSnapshot?.docs || []).map((snapshot) => {
+      const profile = snapshot.data();
+      const createdAt = profile.createdAt?.toDate?.();
+      return {
+        userId: snapshot.id,
+        email: canViewFullUserInfo ? (typeof profile.email === 'string' ? profile.email : null) : null,
+        displayName: canViewFullUserInfo
+          ? (typeof profile.displayName === 'string' ? profile.displayName : null)
+          : null,
+        createdAt: createdAt instanceof Date && Number.isFinite(createdAt.getTime())
+          ? createdAt.toISOString()
+          : null,
+      };
+    });
+
+    res.json({
+      totalUsers,
+      activeUsers,
+      totalCredentials: credentialCount.data().count,
+      totalDocuments: documentCount.data().count,
+      recentUsers,
+      recentActivity: [],
+    });
+  } catch (error) {
+    console.error('[Admin Overview] Could not load overview metadata:', error);
+    res.status(500).json({ error: 'Could not load admin overview data.' });
+  }
 });
 
 // Endpoint to get all payment submissions for Admin Console
@@ -2262,6 +2924,10 @@ search for User UID "${userId}" in the Admin Console.`;
 
 // Mount Vite or serve static assets
 async function startServer() {
+  app.use('/api', (_req: Request, res: Response) => {
+    res.status(404).json({ error: 'API endpoint not found.' });
+  });
+
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
       server: { middlewareMode: true },

@@ -3,9 +3,15 @@ import {
   User,
   onAuthStateChanged,
   signInWithPopup,
+  signInWithRedirect,
   getAdditionalUserInfo,
+  setPersistence,
+  browserLocalPersistence,
+  browserSessionPersistence,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
+  EmailAuthProvider,
+  reauthenticateWithCredential,
   updateProfile,
   sendPasswordResetEmail,
   signOut as fbSignOut,
@@ -26,23 +32,27 @@ interface AuthContextType {
   isAuthModalOpen: boolean;
   openAuthModal: () => void;
   closeAuthModal: () => void;
-  signInWithGoogle: () => Promise<void>;
-  signInWithEmail: (email: string, pass: string) => Promise<void>;
+  signInWithGoogle: () => Promise<boolean>;
+  signInWithEmail: (email: string, pass: string, remember?: boolean) => Promise<void>;
   signUpWithEmail: (email: string, pass: string, displayName?: string) => Promise<void>;
   resetPassword: (email: string) => Promise<void>;
   signOut: () => Promise<void>;
   clearAuthError: () => void;
+  vaultAccessStarted: boolean;
+  continueToVault: () => void;
   recoveryNotice: { code: string } | null;
   clearRecoveryNotice: () => void;
   vaultUnlocked: boolean;
+  vaultUnlockAnimationPending: boolean;
+  clearVaultUnlockAnimationPending: () => void;
   unlockVault: (password: string) => Promise<void>;
   vaultRecoveryKeyNotice: string | null;
   clearVaultRecoveryKeyNotice: () => void;
-  vaultRecoveryTicket: string | null;
-  requestVaultRecoveryEmail: () => Promise<string>;
-  confirmVaultRecoveryEmail: (token: string) => Promise<void>;
   completeVaultPasswordRecovery: (recoveryKey: string, newPassword: string) => Promise<void>;
   rotateVaultRecoveryKey: (password: string) => Promise<void>;
+  requestRecoveryCodeVerification: () => Promise<void>;
+  verifyRecoveryCodeVerification: (code: string) => Promise<void>;
+  issueRecoveryCodeWithPassword: (password: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -54,10 +64,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [bannedReason, setBannedReason] = useState('');
   const [authError, setAuthError] = useState<string | null>(null);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [vaultAccessStarted, setVaultAccessStarted] = useState(false);
   const [recoveryNotice, setRecoveryNotice] = useState<{ code: string } | null>(null);
   const [vaultUnlocked, setVaultUnlocked] = useState(false);
+  const [vaultUnlockAnimationPending, setVaultUnlockAnimationPending] = useState(false);
   const [vaultRecoveryKeyNotice, setVaultRecoveryKeyNotice] = useState<string | null>(null);
-  const [vaultRecoveryTicket, setVaultRecoveryTicket] = useState<string | null>(() => sessionStorage.getItem('vault_x_recovery_ticket'));
   const isSigningInRef = useRef(false);
   const activeUidRef = useRef<string | null>(null);
 
@@ -70,59 +81,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const setup = await createVaultKeyEnvelope(auth.currentUser.uid, password);
       setVaultRecoveryKeyNotice(setup.recoveryKey);
     }
+    setVaultUnlockAnimationPending(true);
     setVaultUnlocked(true);
-  };
-
-  const requestVaultRecoveryEmail = async () => {
-    const account = auth.currentUser;
-    if (!account) throw new Error('Sign in with Google before requesting recovery.');
-    const token = await account.getIdToken();
-    const response = await fetch(`${API_BASE_URL}/api/vault/recovery-email/request`, {
-      method: 'POST', headers: { Authorization: `Bearer ${token}` },
-    });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(data.error || 'Could not send the recovery email.');
-    return String(data.message || 'Check your Google email for the confirmation link.');
-  };
-
-  const confirmVaultRecoveryEmail = async (emailToken: string) => {
-    const response = await fetch(`${API_BASE_URL}/api/vault/recovery-email/confirm`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token: emailToken }),
-    });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok || !data.ticket) throw new Error(data.error || 'That confirmation link is invalid or expired.');
-    sessionStorage.setItem('vault_x_recovery_ticket', data.ticket);
-    setVaultRecoveryTicket(data.ticket);
   };
 
   const completeVaultPasswordRecovery = async (recoveryKey: string, newPassword: string) => {
     const account = auth.currentUser;
     if (!account) throw new Error('Sign in before recovering your vault.');
-    const hasConfirmedGoogleTicket = Boolean(vaultRecoveryTicket);
     const hasPasswordProvider = account.providerData.some((provider) => provider.providerId === 'password');
-    if (!hasConfirmedGoogleTicket && !hasPasswordProvider) throw new Error('Confirm the recovery link sent to your Google email before continuing.');
-    const recoveryResult = await rewrapVaultKeyWithRecovery(account.uid, recoveryKey, newPassword, !hasConfirmedGoogleTicket);
-    const updatedEnvelope = recoveryResult.envelope;
-    if (hasConfirmedGoogleTicket) {
-      const idToken = await account.getIdToken();
-      const response = await fetch(`${API_BASE_URL}/api/vault/recovery-email/complete`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
-        body: JSON.stringify({
-          ticket: vaultRecoveryTicket,
-          passwordSalt: updatedEnvelope.passwordSalt,
-          passwordIv: updatedEnvelope.passwordIv,
-          passwordWrappedKey: updatedEnvelope.passwordWrappedKey,
-          recoveryIv: updatedEnvelope.recoveryIv,
-          recoveryWrappedKey: updatedEnvelope.recoveryWrappedKey,
-        }),
-      });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.error || 'Could not finish vault recovery.');
-      sessionStorage.removeItem('vault_x_recovery_ticket');
-      setVaultRecoveryTicket(null);
-    }
+    if (!hasPasswordProvider) throw new Error('Vault password recovery is available for email/password accounts.');
+    const recoveryResult = await rewrapVaultKeyWithRecovery(account.uid, recoveryKey, newPassword);
+    setVaultUnlockAnimationPending(true);
     setVaultUnlocked(true);
     setVaultRecoveryKeyNotice(recoveryResult.recoveryKey);
   };
@@ -132,13 +101,55 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (!account) throw new Error('Sign in before rotating your recovery key.');
     const recoveryKey = await rotateRecoveryKey(account.uid, password);
     setVaultRecoveryKeyNotice(recoveryKey);
+    setVaultUnlockAnimationPending(true);
     setVaultUnlocked(true);
+  };
+
+  const requestRecoveryCodeVerification = async () => {
+    const account = auth.currentUser;
+    if (!account) throw new Error('Sign in before requesting a recovery code.');
+    const token = await account.getIdToken();
+    const response = await fetch(`${API_BASE_URL}/api/recovery/verification/request`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || 'Could not send the verification email.');
+  };
+
+  const verifyRecoveryCodeVerification = async (code: string) => {
+    const account = auth.currentUser;
+    if (!account) throw new Error('Sign in before confirming your recovery code.');
+    const token = await account.getIdToken();
+    const response = await fetch(`${API_BASE_URL}/api/recovery/verification/confirm`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ code }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.code) throw new Error(data.error || 'Could not issue a new recovery code.');
+    setRecoveryNotice({ code: data.code });
+  };
+
+  const issueRecoveryCodeWithPassword = async (password: string) => {
+    const account = auth.currentUser;
+    if (!account?.email) throw new Error('Sign in with your email and password before requesting a recovery code.');
+    const credential = EmailAuthProvider.credential(account.email, password);
+    await reauthenticateWithCredential(account, credential);
+    const token = await account.getIdToken(true);
+    const response = await fetch(`${API_BASE_URL}/api/recovery/issue`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.code) throw new Error(data.error || 'Could not issue a new recovery code.');
+    setRecoveryNotice({ code: data.code });
   };
 
   const issueRecoveryCode = async (account: User) => {
     try {
       const token = await account.getIdToken();
-      const response = await fetch('/api/recovery/issue', {
+      const response = await fetch(`${API_BASE_URL}/api/recovery/issue`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -164,6 +175,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (activeUidRef.current !== (currentUser?.uid || null)) {
         clearActiveVaultKey();
         setVaultUnlocked(false);
+        setVaultUnlockAnimationPending(false);
         setVaultRecoveryKeyNotice(null);
         activeUidRef.current = currentUser?.uid || null;
       }
@@ -171,6 +183,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (!currentUser) {
         clearActiveVaultKey();
         setVaultUnlocked(false);
+        setVaultUnlockAnimationPending(false);
         setVaultRecoveryKeyNotice(null);
       }
       setLoading(true);
@@ -280,45 +293,64 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [user]);
 
   const signInWithGoogle = async () => {
-    if (isSigningInRef.current) return;
+    if (isSigningInRef.current) {
+      setAuthError('A Google sign-in request is already in progress. Complete or close that window, then try again.');
+      return false;
+    }
     isSigningInRef.current = true;
     try {
       setAuthError(null);
       const result = await signInWithPopup(auth, googleProvider);
+      setVaultAccessStarted(true);
       if (getAdditionalUserInfo(result)?.isNewUser) {
         await issueRecoveryCode(result.user);
       }
       setIsAuthModalOpen(false);
+      return true;
     } catch (err: any) {
-      if (err?.code === 'auth/cancelled-popup-request') return;
+      if (err?.code === 'auth/cancelled-popup-request') {
+        setAuthError('A Google sign-in request was replaced or cancelled. Please try again.');
+        return false;
+      }
       if (err?.code === 'auth/popup-closed-by-user') {
         setAuthError('Google sign-in popup was closed before completion. Please click again to proceed.');
-        return;
+        return false;
       }
       if (err?.code === 'auth/popup-blocked') {
-        setAuthError('Popup blocked by your browser. Please allow popups for this site in your browser URL bar, or run locally on http://localhost:3000.');
-        return;
+        try {
+          await signInWithRedirect(auth, googleProvider);
+        } catch (redirectError: any) {
+          console.error('Google Sign-In redirect failed:', redirectError);
+          setAuthError(redirectError?.message || 'Google sign-in could not start. Check this site in Firebase authorized domains and try again.');
+        }
+        return false;
+      }
+      if (err?.code === 'auth/operation-not-allowed') {
+        setAuthError('Google sign-in is disabled for this Firebase project. Enable the Google provider in Firebase Console > Authentication > Sign-in method.');
+        return false;
       }
       if (err?.code === 'auth/unauthorized-domain') {
         setAuthError(`Domain Not Authorized: "${window.location.hostname}" is not authorized in Firebase for OAuth. Please add "${window.location.hostname}" to Firebase Console > Authentication > Settings > Authorized domains, or run locally on http://localhost:3000 where localhost is authorized by default.`);
-        return;
+        return false;
       }
       if (err?.code === 'auth/network-request-failed') {
         setAuthError('Network error connecting to Firebase Authentication. Please check your internet connection or ad-blocker settings.');
-        return;
+        return false;
       }
       console.error('Google Sign-In failed:', err);
       setAuthError(err?.message || 'Failed to sign in with Google.');
+      return false;
     } finally {
       isSigningInRef.current = false;
     }
   };
 
-  const signInWithEmail = async (email: string, pass: string) => {
+  const signInWithEmail = async (email: string, pass: string, remember = true) => {
     try {
       setAuthError(null);
+      await setPersistence(auth, remember ? browserLocalPersistence : browserSessionPersistence);
       await signInWithEmailAndPassword(auth, email.trim(), pass);
-      await unlockVault(pass);
+      setVaultAccessStarted(true);
       setIsAuthModalOpen(false);
     } catch (err: any) {
       console.error('Email sign-in failed:', err);
@@ -344,8 +376,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setAuthError(null);
       if (pass.length < 8) throw new Error('Choose a sign-in password with at least 8 characters so it can protect your vault key.');
       const res = await createUserWithEmailAndPassword(auth, email.trim(), pass);
+      setVaultAccessStarted(true);
       const keySetup = await createVaultKeyEnvelope(res.user.uid, pass);
       setVaultRecoveryKeyNotice(keySetup.recoveryKey);
+      setVaultUnlockAnimationPending(true);
       setVaultUnlocked(true);
       if (displayName && res.user) {
         await updateProfile(res.user, { displayName: displayName.trim() });
@@ -386,6 +420,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setUser(null);
       clearActiveVaultKey();
       setVaultUnlocked(false);
+      setVaultUnlockAnimationPending(false);
+      setVaultAccessStarted(false);
       setVaultRecoveryKeyNotice(null);
       setIsBanned(false);
       setBannedReason('');
@@ -397,7 +433,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const clearAuthError = () => setAuthError(null);
+  const continueToVault = () => setVaultAccessStarted(true);
   const clearRecoveryNotice = () => setRecoveryNotice(null);
+  const clearVaultUnlockAnimationPending = () => setVaultUnlockAnimationPending(false);
   const clearVaultRecoveryKeyNotice = () => setVaultRecoveryKeyNotice(null);
   const openAuthModal = () => {
     setAuthError(null);
@@ -425,17 +463,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         resetPassword,
         signOut,
         clearAuthError,
+        vaultAccessStarted,
+        continueToVault,
         recoveryNotice,
         clearRecoveryNotice,
         vaultUnlocked,
+        vaultUnlockAnimationPending,
+        clearVaultUnlockAnimationPending,
         unlockVault,
         vaultRecoveryKeyNotice,
         clearVaultRecoveryKeyNotice,
-        vaultRecoveryTicket,
-        requestVaultRecoveryEmail,
-        confirmVaultRecoveryEmail,
         completeVaultPasswordRecovery,
         rotateVaultRecoveryKey,
+        requestRecoveryCodeVerification,
+        verifyRecoveryCodeVerification,
+        issueRecoveryCodeWithPassword,
       }}
     >
       {children}

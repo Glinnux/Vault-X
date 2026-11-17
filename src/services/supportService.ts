@@ -10,13 +10,17 @@ import {
   serverTimestamp,
 } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
+import { getSuperAdminSessionHeaders } from './adminService';
 import { SupportTicket, PaymentSubmissionLog } from '../types/vault';
 
 export const ADMIN_SUPPORT_EMAIL = 'oluwolefaith92@gmail.com';
 
 async function getServerAuthHeaders(): Promise<Record<string, string>> {
   const token = await auth.currentUser?.getIdToken();
-  return token ? { Authorization: `Bearer ${token}` } : {};
+  return {
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...getSuperAdminSessionHeaders(),
+  };
 }
 
 /**

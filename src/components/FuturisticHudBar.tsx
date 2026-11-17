@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Cpu, Activity, Lock, Bot, Copy } from 'lucide-react';
+import React from 'react';
+import { Lock, Bot, Copy } from 'lucide-react';
 
 interface FuturisticHudBarProps {
   totalItems: number;
@@ -16,9 +16,6 @@ export const FuturisticHudBar: React.FC<FuturisticHudBarProps> = ({
   onOpenGuide,
   onToast,
 }) => {
-  const [latency, setLatency] = useState(24);
-  const [isSecure, setIsSecure] = useState(true);
-
   const handleCopyUid = async () => {
     if (!userUid) return;
     try {
@@ -30,83 +27,52 @@ export const FuturisticHudBar: React.FC<FuturisticHudBarProps> = ({
     }
   };
 
-  // Micro jitter for latency to feel like a live secure socket
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setLatency(Math.floor(21 + Math.random() * 8));
-    }, 4000);
-    return () => clearInterval(interval);
-  }, []);
-
   return (
-    <div className="relative z-10 w-full mb-6">
-      <div className="bg-[#05140d]/80 border border-emerald-900/50 rounded-xl px-4 py-2.5 backdrop-blur-md flex flex-wrap items-center justify-between gap-3 text-[11px] font-mono text-slate-300 tech-corners">
-        {/* Left: System Status & Pulse */}
-        <div className="flex items-center space-x-3">
-          <div className="flex items-center space-x-2">
-            <span className="relative flex h-2 w-2">
-              <span className="animate-radar-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-            </span>
-            <span className="font-semibold text-emerald-400 tracking-wider uppercase">
-              ENCLAVE SECURE
-            </span>
-          </div>
-
-          <span className="text-emerald-950 hidden sm:inline">|</span>
-
-          <div className="hidden sm:flex items-center space-x-1.5 text-slate-300">
-            <Lock className="w-3 h-3 text-emerald-400" />
-            <span>AES-256 ZERO-KNOWLEDGE</span>
+    <div className="relative z-10 mb-6 w-full">
+      <div className="vault-status-strip flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm sm:px-5">
+        <div className="flex min-w-0 items-center gap-3">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700">
+            <Lock className="h-4 w-4" />
+          </span>
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-slate-900">Your vault is protected</p>
+            <p className="mt-0.5 text-xs text-slate-500">Your saved items are encrypted</p>
           </div>
         </div>
 
-        {/* Center: Live Telemetry */}
-        <div className="hidden md:flex items-center space-x-4 text-[10px] text-slate-400">
-          <div className="flex items-center space-x-1 text-slate-300">
-            <Cpu className="w-3 h-3 text-emerald-400" />
-            <span>VAULT X CLOUD</span>
-          </div>
-          <div className="flex items-center space-x-1">
-            <Activity className="w-3 h-3 text-emerald-400" />
-            <span>PING: {latency}ms</span>
-          </div>
-        </div>
-
-        {/* Right: Quick Security Audit trigger & Record badge */}
-        <div className="flex flex-wrap items-center justify-end gap-2 ml-auto">
+        <div className="flex flex-wrap items-center justify-end gap-2">
           {userUid && (
             <div
-              className="inline-flex items-center space-x-1 bg-black/60 text-slate-300 border border-emerald-950 px-2 py-0.5 rounded text-[10px]"
+              className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs text-slate-600"
               title={`Verification UID: ${userUid}`}
             >
-              <span className="text-slate-400">UID:</span>
-              <span className="text-emerald-300 font-bold">{userUid.slice(0, 8)}...</span>
+              <span className="hidden text-slate-500 sm:inline">ID</span>
+              <span className="font-medium text-slate-700">{userUid.slice(0, 8)}…</span>
               <button
                 type="button"
                 onClick={handleCopyUid}
-                className="inline-flex items-center gap-1 text-slate-400 hover:text-white p-1 rounded"
+                className="rounded-md p-1 text-slate-500 hover:bg-white hover:text-emerald-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-emerald-600"
                 title="Copy user ID"
                 aria-label="Copy user ID"
               >
-                <Copy className="w-3 h-3" />
-                <span className="sm:hidden">Copy ID</span>
+                <Copy className="h-3.5 w-3.5" />
               </button>
             </div>
           )}
 
-          <span className="bg-emerald-950/80 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded text-[10px]">
-            [{totalItems} {totalItems === 1 ? 'RECORD' : 'RECORDS'} ENCRYPTED]
+          <span className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+            <strong className="font-semibold text-slate-900">{totalItems}</strong>
+            <span className="ml-1">{totalItems === 1 ? 'saved item' : 'saved items'}</span>
           </span>
 
           {onOpenGuide && (
             <button
               onClick={onOpenGuide}
-              className="flex items-center space-x-1 text-[10px] text-emerald-300 hover:text-white bg-emerald-950/60 hover:bg-emerald-900 border border-emerald-500/40 hover:border-emerald-300 px-2.5 py-1 rounded-lg transition-all cursor-pointer shadow-xs shadow-emerald-950/40"
+              className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 transition-colors hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-emerald-600"
               title="Open Vault X Storage & Information Guide"
             >
-              <Bot className="w-3.5 h-3.5 text-emerald-400" />
-              <span>GUIDE</span>
+              <Bot className="h-4 w-4" />
+              <span>Guide</span>
             </button>
           )}
         </div>

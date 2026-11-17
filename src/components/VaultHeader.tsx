@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { doc, onSnapshot } from 'firebase/firestore';
 import {
   LogOut,
@@ -9,6 +9,8 @@ import {
   LifeBuoy,
   Copy,
   Check,
+  KeyRound,
+  ChevronDown,
 } from 'lucide-react';
 import { VaultXLogo } from './VaultXLogo';
 import { useAuth } from '../context/AuthContext';
@@ -33,6 +35,7 @@ interface VaultHeaderProps {
   isAdmin?: boolean;
   onInstallApp?: () => void;
   isInstallable?: boolean;
+  onManageRecoveryCode?: () => void;
 }
 
 export const VaultHeader: React.FC<VaultHeaderProps> = ({
@@ -44,11 +47,31 @@ export const VaultHeader: React.FC<VaultHeaderProps> = ({
   isAdmin: isAdminProp,
   onInstallApp,
   isInstallable,
+  onManageRecoveryCode,
 }) => {
   const { user, openAuthModal, signOut, loading, isBanned } = useAuth();
   const { t, isAutoMode, currentLangInfo } = useLanguage();
   const [hasAppointedAdminRecord, setHasAppointedAdminRecord] = useState(false);
   const [pendingPaymentsCount, setPendingPaymentsCount] = useState(0);
+  const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
+  const accountMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handlePointerDown = (event: PointerEvent) => {
+      if (accountMenuRef.current && !accountMenuRef.current.contains(event.target as Node)) {
+        setIsAccountMenuOpen(false);
+      }
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setIsAccountMenuOpen(false);
+    };
+    document.addEventListener('pointerdown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, []);
 
   useEffect(() => {
     if (!user || isBanned) {
@@ -107,7 +130,7 @@ export const VaultHeader: React.FC<VaultHeaderProps> = ({
             onClick={() => onSelectView('all')}
           >
             <div className="vault-brand-logo relative self-center translate-y-1">
-              <VaultXLogo size={64} showGlow={true} />
+              <VaultXLogo size={70} showGlow={false} />
               <span className="absolute -top-1 -right-1 flex h-2.5 w-2.5">
                 <span className="animate-radar-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                 <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
@@ -170,53 +193,87 @@ export const VaultHeader: React.FC<VaultHeaderProps> = ({
             {loading ? (
               <div className="w-8 h-8 rounded-full border-2 border-slate-700 border-t-cyan-500 animate-spin" />
             ) : user ? (
-              <div className="vault-header-account flex min-w-0 shrink-0 items-center space-x-3 pl-2 border-l border-slate-800">
-                <div className="flex items-center space-x-2">
+              <div className="vault-header-account relative min-w-0 shrink-0 pl-2 border-l border-slate-800" ref={accountMenuRef}>
+                <button
+                  type="button"
+                  onClick={() => setIsAccountMenuOpen((open) => !open)}
+                  aria-expanded={isAccountMenuOpen}
+                  aria-haspopup="menu"
+                  aria-label="Open account menu"
+                  className="vault-account-trigger flex items-center gap-2 rounded-xl p-1.5 text-left hover:bg-slate-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-600"
+                >
                   {user.photoURL ? (
                     <img
                       src={user.photoURL}
-                      alt={user.displayName || 'User'}
-                      className="w-8 h-8 rounded-full ring-2 ring-cyan-500/40 object-cover"
+                      alt=""
+                      className="h-9 w-9 rounded-full object-cover ring-2 ring-emerald-100"
                     />
                   ) : (
-                    <div className="w-8 h-8 rounded-full bg-cyan-700 flex items-center justify-center font-bold text-xs text-white">
+                    <span className="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-700 text-sm font-bold text-white">
                       {(user.displayName || user.email || 'U')[0].toUpperCase()}
-                    </div>
+                    </span>
                   )}
-                  <div className="hidden lg:block text-left">
-                    <div className="text-xs font-medium text-white max-w-[130px] truncate">
-                      {user.displayName || 'Google User'}
-                    </div>
-                    <div className="text-[10px] text-slate-400 max-w-[130px] truncate font-mono">
+                  <span className="hidden max-w-[150px] text-left sm:block">
+                    <span className="block truncate text-xs font-semibold text-slate-900">
+                      {user.displayName || 'Account'}
+                    </span>
+                    <span className="block max-w-[150px] truncate text-[10px] text-slate-500">
                       {user.email}
-                    </div>
-                  </div>
-                </div>
-
-                {/* User UID verification chip */}
-                <div className="vault-header-uid-chip hidden md:flex items-center space-x-1.5 bg-slate-950/80 border border-slate-800 px-2 py-1 rounded-lg text-[10px] font-mono text-slate-400">
-                  <span className="text-slate-500">UID:</span>
-                  <span className="text-cyan-300 font-semibold truncate max-w-[80px]" title={user.uid}>
-                    {user.uid.slice(0, 8)}...
+                    </span>
                   </span>
-                  <button
-                    onClick={() => {
-                      navigator.clipboard.writeText(user.uid);
-                    }}
-                    className="text-slate-400 hover:text-white p-0.5 rounded cursor-pointer"
-                    title={`Copy full User UID: ${user.uid}`}
-                  >
-                    <Copy className="w-3 h-3" />
-                  </button>
-                </div>
-
-                <button
-                  onClick={signOut}
-                  className="p-2 text-slate-400 hover:text-rose-400 hover:bg-rose-950/40 rounded-lg transition-colors cursor-pointer"
-                  title="Lock Vault & Terminate Session"
-                >
-                  <LogOut className="w-4 h-4" />
+                  <ChevronDown className={`hidden h-4 w-4 text-slate-500 transition-transform sm:block ${isAccountMenuOpen ? 'rotate-180' : ''}`} />
                 </button>
+
+                {isAccountMenuOpen && (
+                  <div className="modern-dropdown-panel absolute right-0 z-50 mt-2 w-72 rounded-2xl border border-slate-200 bg-white p-2 shadow-xl" role="menu" aria-label="Account options">
+                    <div className="border-b border-slate-100 px-3 py-2.5">
+                      <p className="text-xs font-semibold text-slate-900">{user.displayName || 'Your account'}</p>
+                      <p className="mt-0.5 truncate text-xs text-slate-500">{user.email}</p>
+                    </div>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        void navigator.clipboard.writeText(user.uid).catch((error: unknown) => {
+                          console.error('Could not copy account ID:', error);
+                        });
+                        setIsAccountMenuOpen(false);
+                      }}
+                      className="modern-menu-item mt-1 flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-sm text-slate-700 hover:bg-slate-50"
+                    >
+                      <Copy className="h-4 w-4 text-slate-400" />
+                      <span className="min-w-0 flex-1 truncate">Copy account ID</span>
+                      <span className="text-[10px] text-slate-400">{user.uid.slice(0, 8)}…</span>
+                    </button>
+                    {onManageRecoveryCode && (
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          setIsAccountMenuOpen(false);
+                          onManageRecoveryCode();
+                        }}
+                        className="modern-menu-item flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-sm text-slate-700 hover:bg-slate-50"
+                      >
+                        <KeyRound className="h-4 w-4 text-emerald-700" />
+                        Recovery code
+                      </button>
+                    )}
+                    <div className="my-1 border-t border-slate-100" />
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setIsAccountMenuOpen(false);
+                        void signOut();
+                      }}
+                      className="modern-menu-item flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-sm font-medium text-rose-700 hover:bg-rose-50"
+                    >
+                      <LogOut className="h-4 w-4" />
+                      Lock vault and sign out
+                    </button>
+                  </div>
+                )}
               </div>
             ) : (
               <button

@@ -1,4 +1,5 @@
 import { auth } from '../lib/firebase';
+import { getSuperAdminSessionHeaders } from './adminService';
 
 export interface RecoveryRequest {
   id: string;
@@ -16,6 +17,7 @@ async function authorizedFetch(input: string, init?: RequestInit) {
     headers: {
       ...(init?.headers || {}),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...getSuperAdminSessionHeaders(),
     },
   });
 }

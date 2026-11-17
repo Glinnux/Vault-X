@@ -127,7 +127,7 @@ export const EditVaultItemModal: React.FC<EditVaultItemModalProps> = ({
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.96, y: 10 }}
         transition={{ duration: 0.2, ease: 'easeOut' }}
-        className="bg-slate-900/95 border border-cyan-500/30 rounded-2xl w-full max-w-xl p-4 sm:p-6 shadow-2xl shadow-cyan-950/30 relative max-h-[90dvh] overflow-y-auto tech-corners"
+        className="vault-modal-panel bg-slate-900/95 border border-cyan-500/30 rounded-2xl w-full max-w-xl p-4 sm:p-6 shadow-2xl shadow-cyan-950/30 relative max-h-[90dvh] overflow-y-auto tech-corners"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between pb-3.5 mb-4 border-b border-slate-800">
@@ -142,6 +142,7 @@ export const EditVaultItemModal: React.FC<EditVaultItemModalProps> = ({
           </div>
           <button
             onClick={onClose}
+            aria-label="Close edit credential dialog"
             className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
           >
             <X className="w-5 h-5" />

@@ -341,7 +341,7 @@ export const TRANSLATIONS: Record<SupportedLanguage, Record<string, string>> = {
     add_document: 'Fi Ìwé Kún Un',
     add_first_item: 'Fi Àkọọ́lẹ̀ Àkọ́kọ́ Síbẹ̀',
     empty_vault_title: 'Àpótí rẹ kò ní nǹkan kankan nínú',
-    empty_vault_desc: 'Bẹ̀rẹ̀ sí ní fi ọ̀rọ̀ aṣírí Facebook, Google àti àwọn ìwé rẹ pamọ́ láìsí ewu.',
+    empty_vault_desc: 'Fifi ọ̀rọ̀ aṣírí Facebook, Google àti àwọn ìwé rẹ pamọ́ láìsí ewu.',
     load_sample: 'Wo Àwọn Àpẹẹrẹ',
     free_plan_badge: 'Ọ̀FẸ́ (ÀÀYÈ 10)',
     paid_plan_badge: 'PRO VAULT (+20 ÀÀYÈ)',

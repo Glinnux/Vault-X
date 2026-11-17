@@ -28,6 +28,24 @@ export const SUPER_ADMIN_EMAILS = [
 ];
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
+const SUPER_ADMIN_SESSION_STORAGE_KEY = 'vault-x-super-admin-session';
+
+export function getSuperAdminAccessSessionToken(): string | null {
+  return typeof window === 'undefined' ? null : window.sessionStorage.getItem(SUPER_ADMIN_SESSION_STORAGE_KEY);
+}
+
+function storeSuperAdminAccessSessionToken(sessionToken: string): void {
+  window.sessionStorage.setItem(SUPER_ADMIN_SESSION_STORAGE_KEY, sessionToken);
+}
+
+export function clearSuperAdminAccessSessionToken(): void {
+  if (typeof window !== 'undefined') window.sessionStorage.removeItem(SUPER_ADMIN_SESSION_STORAGE_KEY);
+}
+
+export function getSuperAdminSessionHeaders(): Record<string, string> {
+  const sessionToken = getSuperAdminAccessSessionToken();
+  return sessionToken ? { 'X-Super-Admin-Session': sessionToken } : {};
+}
 
 export type AdminNotificationCategory = 'admin_activity' | 'payments' | 'support' | 'recovery';
 export type AdminNotificationPreferences = Record<AdminNotificationCategory, boolean>;
@@ -47,6 +65,152 @@ interface AdminNotificationApiResponse {
   message?: string;
 }
 
+export interface AdminOverview {
+  totalUsers: number;
+  activeUsers: number;
+  totalCredentials: number;
+  totalDocuments: number;
+  recentUsers: Array<{
+    userId: string;
+    email: string | null;
+    displayName: string | null;
+    createdAt: string | null;
+  }>;
+  recentActivity: [];
+}
+
+export class AdminOverviewError extends Error {
+  constructor(message: string, public readonly status: number) {
+    super(message);
+    this.name = 'AdminOverviewError';
+  }
+}
+
+export interface SuperAdminAccessChallenge {
+  challengeToken: string;
+  expiresAt: number;
+}
+
+export interface SuperAdminAccessSession {
+  sessionToken: string;
+}
+
+export async function verifySuperAdminPassword(password: string): Promise<SuperAdminAccessChallenge> {
+  const token = await auth.currentUser?.getIdToken();
+  if (!token) throw new Error('You must be signed in to verify Super Admin access.');
+
+  const response = await fetch(`${API_BASE_URL}/api/superadmin/access/verify`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ password }),
+  });
+  const data = await response.json().catch(() => ({})) as Partial<SuperAdminAccessChallenge> & { error?: string };
+  if (!response.ok) throw new Error(data.error || 'Super Admin password verification failed.');
+  if (
+    typeof data.challengeToken !== 'string' ||
+    !Number.isFinite(data.expiresAt) ||
+    Number(data.expiresAt) <= Date.now()
+  ) {
+    throw new Error('The server returned an invalid owner verification challenge.');
+  }
+  return { challengeToken: data.challengeToken, expiresAt: Number(data.expiresAt) };
+}
+
+export async function verifySuperAdminOwnerWord(
+  ownerWord: string,
+  challengeToken: string
+): Promise<SuperAdminAccessSession> {
+  const token = await auth.currentUser?.getIdToken();
+  if (!token) throw new Error('You must be signed in to verify Super Admin access.');
+
+  const response = await fetch(`${API_BASE_URL}/api/superadmin/access/owner-verify`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+      'X-Super-Admin-Challenge': challengeToken,
+    },
+    body: JSON.stringify({ ownerWord }),
+  });
+  const data = await response.json().catch(() => ({})) as Partial<SuperAdminAccessSession> & { error?: string };
+  if (!response.ok) throw new Error(data.error || 'Owner word verification failed.');
+  if (typeof data.sessionToken !== 'string') {
+    throw new Error('The server returned an invalid Super Admin access session.');
+  }
+  storeSuperAdminAccessSessionToken(data.sessionToken);
+  return { sessionToken: data.sessionToken };
+}
+
+export async function validateSuperAdminAccessSession(sessionToken: string): Promise<void> {
+  const token = await auth.currentUser?.getIdToken();
+  if (!token) throw new Error('You must be signed in to access Super Admin tools.');
+
+  const response = await fetch(`${API_BASE_URL}/api/superadmin/access/check`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'X-Super-Admin-Session': sessionToken,
+    },
+  });
+  const data = await response.json().catch(() => ({})) as { error?: string; verified?: boolean };
+  if (!response.ok || data.verified !== true) {
+    if (response.status === 401 || response.status === 403) clearSuperAdminAccessSessionToken();
+    throw new Error(data.error || 'A verified Super Admin session is required.');
+  }
+}
+
+export async function revokeSuperAdminAccessSession(sessionToken: string): Promise<void> {
+  const token = await auth.currentUser?.getIdToken();
+  if (!token) throw new Error('You must be signed in to end the Super Admin session.');
+
+  const response = await fetch(`${API_BASE_URL}/api/superadmin/access/revoke`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'X-Super-Admin-Session': sessionToken,
+    },
+  });
+  const data = await response.json().catch(() => ({})) as { error?: string };
+  if (!response.ok) throw new Error(data.error || 'Could not revoke the Super Admin access session.');
+  clearSuperAdminAccessSessionToken();
+}
+
+export async function fetchAdminOverview(): Promise<AdminOverview> {
+  const token = await auth.currentUser?.getIdToken();
+  if (!token) throw new AdminOverviewError('Authentication required.', 401);
+
+  const response = await fetch(`${API_BASE_URL}/api/admin/overview`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      ...getSuperAdminSessionHeaders(),
+    },
+  });
+  const contentType = response.headers.get('content-type') || '';
+  if (!contentType.toLowerCase().includes('application/json')) {
+    throw new AdminOverviewError(
+      'The admin API returned a web page instead of data. Restart the server so its API routes are loaded.',
+      response.status === 200 ? 503 : response.status
+    );
+  }
+  const data = await response.json() as AdminOverview & { error?: string };
+  if (!response.ok) {
+    throw new AdminOverviewError(data.error || 'Could not load the admin overview.', response.status);
+  }
+  if (
+    !Number.isFinite(data.totalUsers) ||
+    !Number.isFinite(data.activeUsers) ||
+    !Number.isFinite(data.totalCredentials) ||
+    !Number.isFinite(data.totalDocuments) ||
+    !Array.isArray(data.recentUsers)
+  ) {
+    throw new AdminOverviewError('The server returned invalid admin overview data.', 502);
+  }
+  return data;
+}
+
 export type AdminActivityAction =
   | 'subscription_approved'
   | 'subscription_extended'
@@ -64,7 +228,7 @@ export type AdminActivityAction =
 async function getNotificationAuthHeaders(): Promise<Record<string, string>> {
   const token = await auth.currentUser?.getIdToken();
   if (!token) throw new Error('You must be signed in to manage email notifications.');
-  return { Authorization: `Bearer ${token}` };
+  return { Authorization: `Bearer ${token}`, ...getSuperAdminSessionHeaders() };
 }
 
 async function readNotificationResponse(response: Response): Promise<AdminNotificationApiResponse> {
@@ -504,13 +668,17 @@ export async function removeAdminRole(
 }
 
 /**
- * Banning an account: Appointed admins can ban suspicious users; Superadmin can also ban.
+ * Banning an account is restricted to the authenticated SuperAdmin.
  */
 export async function banUserAccount(
   targetUserId: string,
-  reason: string,
-  bannedByEmail: string
+  reason: string
 ): Promise<void> {
+  const bannedByEmail = auth.currentUser?.email;
+  if (!bannedByEmail || !isSuperAdminUser(bannedByEmail)) {
+    throw new Error('Permission Denied: Only the SuperAdmin can ban user accounts.');
+  }
+
   const cleanReason = reason.trim() || 'Suspicious activity or unauthorized access detected';
   const userDocRef = doc(db, 'users', targetUserId);
 
@@ -527,10 +695,9 @@ export async function banUserAccount(
  * Unbanning an account: STRICTLY permitted only for the primary owner / super-admin!
  */
 export async function unbanUserAccount(
-  targetUserId: string,
-  requestedByEmail: string
+  targetUserId: string
 ): Promise<void> {
-  if (!isSuperAdminUser(requestedByEmail)) {
+  if (!auth.currentUser?.email || !isSuperAdminUser(auth.currentUser.email)) {
     throw new Error('Permission Denied: Unbanning accounts is reserved exclusively for the Primary Superadmin.');
   }
 
